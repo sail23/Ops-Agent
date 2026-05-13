@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 
 from power_aiops.api.schemas import IncidentRunRequest, IncidentRunResponse, build_incident_context
 from power_aiops.llm.client import OpenAICompatibleClient
@@ -256,13 +257,13 @@ def execute_incident_run(req: IncidentRunRequest) -> IncidentRunResponse:
     board = SharedBoard()
     state = run_pipeline(ctx, board=board)
 
-    # 自动入库知识库
+    # 自动入库知识库（后台线程，不阻塞响应）
     if state.agent_outputs:
-        _auto_persist_to_knowledge_base(
-            incident_id=ctx.incident_id,
-            summary=ctx.summary,
-            agent_outputs=state.agent_outputs,
-        )
+        threading.Thread(
+            target=_auto_persist_to_knowledge_base,
+            args=(ctx.incident_id, ctx.summary, state.agent_outputs),
+            daemon=True,
+        ).start()
 
     report_content = board.get("report_output", "")
 
@@ -319,13 +320,13 @@ async def stream_incident_run(req: IncidentRunRequest):
             "fence_matched": chunk.fence_matched,
         })
 
-    # 自动入库知识库
+    # 自动入库知识库（后台线程，不阻塞 SSE done 事件）
     if agent_outputs_buffer:
-        _auto_persist_to_knowledge_base(
-            incident_id=ctx.incident_id,
-            summary=ctx.summary,
-            agent_outputs=agent_outputs_buffer,
-        )
+        threading.Thread(
+            target=_auto_persist_to_knowledge_base,
+            args=(ctx.incident_id, ctx.summary, agent_outputs_buffer),
+            daemon=True,
+        ).start()
 
     # 发送完成事件（包含报告内容供前端保存）
     report_content = board.get("report_output", "")
