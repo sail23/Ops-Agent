@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /d \"C:\\\\Users\\\\cfyzy\\\\Desktop\\\\agents-\")",
+      "Bash(]+)",
+      "Bash(rm -rf /)",
+      "Bash(..venvScriptspython -c ' *)"
+    ]
+  }
+}

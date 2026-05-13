@@ -1,0 +1,355 @@
+---
+description: power-aiops 待实现功能清单与优先级
+alwaysApply: true
+---
+
+# power-aiops 待实现功能清单
+
+本文档记录项目中所有占位/桩实现的功能，按优先级排序，便于按需逐步落地。
+
+---
+
+## 一、高优先级（核心能力）
+
+### 1. LLM 接入（已完成）
+
+| 功能 | 文件 | 状态 | 配置 |
+|------|------|------|------|
+| DeepSeek 接入 | `.env`, `llm/client.py` | ✅ 已完成 | `OPENAI_API_BASE=https://api.deepseek.com` |
+| OpenAI 接入 | `llm/client.py` | ✅ 已完成 | `OPENAI_API_KEY=sk-xxx` |
+| OpsAgent LLM | `agents/ops.py` | ✅ 已完成 | 默认 `use_llm=True` |
+| 短期记忆摘要 | `memory/short_term.py` | 待实现 | 接入 LLM 做压缩摘要 |
+
+**配置示例**：
+```bash
+# DeepSeek
+OPENAI_API_BASE=https://api.deepseek.com
+OPENAI_API_KEY=sk-your-key
+OPENAI_CHAT_MODEL=deepseek-chat
+
+# OpenAI
+OPENAI_API_BASE=https://api.openai.com/v1
+OPENAI_API_KEY=sk-your-key
+OPENAI_CHAT_MODEL=gpt-4o-mini
+```
+
+### 2. Agent 真实推理逻辑（已完成）
+
+| Agent | 文件 | 状态 | 说明 |
+|-------|------|------|------|
+| OpsAgent | `agents/ops.py` | ✅ 已完成 | 默认 `use_llm=True` |
+| SREAgent | `agents/sre.py` | ✅ 已完成 | 架构分析与方案生成 |
+| CodeAgent | `agents/code.py` | ✅ 已完成 | 脚本生成 + fence 安全检查 |
+| ReportAgent | `agents/report.py` | ✅ 已完成 | 报告生成与知识沉淀 |
+
+---
+
+## 二、中优先级（外部集成）
+
+### 3. Prometheus 监控接入
+
+| 文件 | 函数 | 当前状态 |
+|------|------|----------|
+| `integrations/prometheus.py` | `fetch_events_stub()` | 返回空列表 `[]` |
+
+**待实现**：
+- 调用 `GET /api/v1/query` 或 `query_range`
+- 解析 PromQL 结果并映射为 `EventObject`
+- 支持 bearer token / mTLS 认证
+
+**示例实现框架**：
+```python
+def fetch_events(config: PrometheusClientConfig, query: str) -> list[EventObject]:
+    # 1. httpx.get(f"{config.base_url}/api/v1/query?query={query}")
+    # 2. 解析 JSON data.result[]
+    # 3. return [map_prometheus_sample_to_event(...) for ...]
+```
+
+### 4. ELK 日志接入
+
+| 文件 | 函数 | 当前状态 |
+|------|------|----------|
+| `integrations/elk.py` | `fetch_events_stub()` | 返回空列表 `[]` |
+
+**待实现**：
+- 调用 `POST /{index}/_search`
+- 解析 ES/OS hits 并映射为 `EventObject`
+- 支持 basic auth / API Key / OIDC
+
+### 5. OpenRCA 数据集接入（已完成）
+
+| 文件 | 类/函数 | 状态 |
+|------|---------|------|
+| `integrations/openrca.py` | `OpenRCAClient` | ✅ 已完成 |
+| `scripts/load_openrca_data.py` | `load_openrca_data` | ✅ 已完成 |
+| `scripts/load_traces.py` | `load_traces` | ✅ 已完成 |
+| `config.py` | `openrca_dataset_path`, `openrca_system` | ✅ 已完成 |
+
+**功能**：
+- 加载 `query.csv`（根因信息）
+- 加载 `record.csv`（故障记录）
+- 解析 `telemetry/log/*.csv`（日志）
+- 解析 `telemetry/metric/*.csv`（指标）
+- 解析 `telemetry/trace/*.csv`（链路追踪）
+
+**链路追踪能力（新增）**：
+- `TraceSpan` / `TraceContext` 数据结构
+- `store_trace()` / `store_span()` 存储方法
+- `get_trace_tree()` 获取链路树
+- `get_slow_traces()` 慢链路查询
+- `get_error_traces()` 错误链路查询
+- `get_fault_propagation_path()` 故障传播路径分析
+- `export_trace_for_visualization()` D3.js 可视化导出
+
+**使用方法**：
+```bash
+# 下载数据集
+gdown https://drive.google.com/uc?id=1enBrdPT3wLG94ITGbSOwUFg9fkLR-16R  # Bank
+gdown https://drive.google.com/uc?id=1cyOKpqyAP4fy-QiJ6a_cKuwR7D46zyVe  # Telecom
+
+# 加载根因数据
+set PYTHONPATH=src;. && python -m power_aiops.scripts.load_openrca_data
+
+# 加载链路追踪
+python -m power_aiops.scripts.load_traces --date 2021_03_04
+```
+
+### 6. 长期记忆（向量库 RAG）
+
+| 文件 | 类 | 状态 |
+|------|------|------|
+| `memory/vector_rag.py` | `ChromaVectorRAG` | ✅ 已完成 |
+| `memory/long_term.py` | `LongTermMemory` 混合检索 | ✅ 已完成 |
+| `agents/sre.py` | SREAgent 混合检索集成 | ✅ 已完成 |
+| `orchestration/pipeline.py` | Pipeline LongTermMemory 初始化 | ✅ 已完成 |
+
+**核心能力**：
+- **Chroma 向量库**：本地持久化向量数据库（轻量，无需额外服务）
+- **Zhipu Embedding**：复用项目已有配置（`embedding-3`, 256 维）
+- **混合检索**：Graph RAG + Vector RAG 融合排序（RRF 算法）
+- **批量存储**：支持批量导入历史故障案例
+- **Pipeline 集成**：SREAgent 自动检索相似案例注入上下文
+- **Debate 集成**：辩论完成后自动持久化到知识库
+
+**完整流程**：
+```
+故障发生 → Pipeline/Debate 执行
+              ↓
+        SREAgent (自动混合检索)
+              ↓
+        ┌─────────────────────────┐
+        │  LongTermMemory          │
+        │  hybrid_search()         │
+        │  (Graph + Vector RRF)   │
+        └───────────┬─────────────┘
+                    ↓
+            相似案例注入上下文
+                    ↓
+              Agent 分析生成方案
+                    ↓
+        处置结果自动持久化到知识库
+```
+
+**使用方法**：
+```python
+from power_aiops.memory import LongTermMemory, IncidentDocument
+
+memory = LongTermMemory()
+memory.initialize()
+
+# 存储故障案例（Pipeline/Debate 自动调用）
+doc = IncidentDocument(
+    incident_id="INC-001",
+    title="支付服务超时",
+    symptoms=["支付失败", "响应时间 > 5s"],
+    root_cause="数据库连接池耗尽",
+    solution="扩容连接池"
+)
+memory.vector_rag.store_incident(doc)
+
+# 混合检索（Pipeline 内部自动调用）
+results = memory.hybrid_search("支付超时问题", top_k=5)
+
+# 纯语义检索
+results = memory.semantic_search("数据库连接异常")
+```
+
+**配置项**（`.env`）：
+```bash
+# Zhipu Embedding（已有）
+ZHIPU_API_KEY=your-api-key
+ZHIPU_EMBEDDING_MODEL=embedding-3
+ZHIPU_EMBEDDING_DIM=256
+
+# Chroma 向量库（新增）
+CHROMA_PERSIST_DIRECTORY=./chroma_data
+```
+
+---
+
+## 三、低优先级（工程化）
+
+### 6. 持久化层
+
+| 功能 | 当前状态 | 待实现 |
+|------|----------|--------|
+| 消息持久化 | `InMemoryMessageLog` | Redis Stream / Kafka |
+| 状态持久化 | `SharedBoard` 内存 | Redis / 数据库 |
+| 共享黑板 | 仅进程内存 | 跨服务共享 |
+
+### 7. 权限与安全
+
+| 功能 | 文件 | 当前状态 |
+|------|------|----------|
+| 权限矩阵 | `security/permissions.py` | 已定义但无调用 |
+| 高危命令围栏 | `security/fences.py` | 4 条正则规则 |
+
+**待实现**：
+- `assert_permission()` 实际调用
+- 动态策略管理
+- 围栏规则扩展
+
+### 8. 编排扩展
+
+| 功能 | 当前状态 | 待实现 |
+|------|----------|--------|
+| 条件路由 | 固定顺序 | if/else 分支 |
+| 并行执行 | 串行执行 | 并行 Agent |
+| 子流程 | 无 | 子 Pipeline 调用 |
+
+### 9. API 扩展
+
+| 端点 | 状态 |
+|------|------|
+| `/incidents/run` | ✅ 已实现 |
+| `/incidents/demo` | ✅ 已实现 |
+| `/health` | ✅ 已实现 |
+
+**待实现**：
+- 告警历史查询
+- Agent 状态监控
+- 配置热更新
+
+### 10. CLI 扩展
+
+| 命令 | 状态 |
+|------|------|
+| `power-aiops run --demo` | ✅ 已实现 |
+| `power-aiops run --json` | ✅ 已实现 |
+
+**待实现**：
+- 交互式对话模式
+- 实时流式输出
+- 配置管理子命令
+
+---
+
+## 四、后续里程碑
+
+### 11. K8s 沙箱（代码执行隔离）
+
+| 当前状态 | 待实现 |
+|----------|--------|
+| 文本围栏检查 | K8s 容器隔离执行 |
+| 无真正执行 | 脚本预演与回放 |
+
+**推荐方案**：
+- Kubernetes Job / Pod 创建
+- 资源限制（CPU/内存/时间）
+- 执行结果验证
+
+### 12. 链路追踪能力（已完成）
+
+| 功能 | 方法 | 说明 |
+|------|------|------|
+| 链路存储 | `store_trace()` | 存储 Trace + Span |
+| 链路树 | `get_trace_tree()` | 获取父子关系树 |
+| 慢链路 | `get_slow_traces()` | 按耗时筛选 |
+| 错误链路 | `get_error_traces()` | 含错误 Span |
+| 传播路径 | `get_fault_propagation_path()` | 故障根因链 |
+| 可视化 | `export_trace_for_visualization()` | D3.js 格式 |
+
+**图谱结构**：
+```cypher
+(Trace)-[:CONTAINS]->(Span)-[:CALLS]->(Span)
+(Span)-[:BELONGS_TO]->(Service)
+(Trace)-[:RELATED_TO]->(FaultCase)
+```
+
+### 13. Code-Agent 增强 - 动态代码生成（已完成）
+
+| 文件 | 类/函数 | 状态 |
+|------|---------|------|
+| `agents/dynamic_code.py` | `DynamicCodeAgent` | ✅ 已完成 |
+| `agents/dynamic_code.py` | `RCAgent` | ✅ 已完成 |
+
+**核心能力**：
+- **动态代码生成**：根据故障上下文生成 Python 分析代码
+- **Neo4j 图查询**：查询 Trace/故障案例/服务调用图
+- **OpenRCA 数据集**：支持加载数据集进行分析
+- **安全执行沙箱**：subprocess 隔离执行 + 超时控制
+
+**参考 OpenDerisk RCA-agent 模式**：
+- 使用 Python 代码做数据检索，避免直接向 LLM 发送大量上下文
+- 代码中嵌入 Cypher 查询，访问图数据库
+
+**使用方法**：
+```python
+from power_aiops.agents.dynamic_code import DynamicCodeAgent
+
+agent = DynamicCodeAgent(
+    enable_execution=True,  # 启用代码执行
+    execution_timeout=30,    # 30秒超时
+)
+result = agent.run(ctx)
+```
+
+**代码生成示例**：
+```python
+# 自动生成包含以下内容的代码：
+# 1. 故障摘要分析
+# 2. 事件统计
+# 3. Neo4j 查询（错误链路/慢链路）
+# 4. 根因分析建议
+```
+
+### 14. 人工审批流
+
+| 功能 | 待实现 |
+|------|--------|
+| 关键步骤确认 | ✅ |
+| 审批记录签名 | ✅ |
+| 告警冻结流程 | ✅ |
+
+### 15. K8s 沙箱（代码执行隔离）
+
+## 五、开发顺序建议
+
+```
+第一阶段（快速见效）
+ 1. LLM 接入 → 配置 DeepSeek/OpenAI 密钥
+ 2. OpsAgent 启用 LLM → use_llm=True
+
+第二阶段（核心能力）
+ 3. SREAgent 真实推理 ✅ 混合 RAG 集成
+ 4. ReportAgent 报告生成 ✅ 已完成
+ 5. 短期记忆摘要
+
+第三阶段（外部集成）
+ 6. OpenRCA 数据集接入 ✅ 已完成
+ 7. 链路追踪能力 ✅ 已完成
+ 8. Prometheus 接入
+ 9. ELK 接入
+
+第四阶段（工程化）
+ 10. 向量库 RAG ✅ 已完成（Chroma + Zhipu + 混合检索）
+ 11. 持久化层 ✅ Pipeline/Debate 自动持久化
+ 12. Code-Agent 动态代码生成 ✅ 已完成
+ 13. K8s 沙箱
+ 14. 人工审批流
+```
+
+---
+
+*文档版本：与仓库 power-aiops-agents 0.1.0 对齐*
+*更新时间：2026-04-07*

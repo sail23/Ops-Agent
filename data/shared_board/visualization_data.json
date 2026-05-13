@@ -1,0 +1,26 @@
+{
+  "timeline_chart": "vis bar\ntitle 故障诊断流程 - INC-58cb7aedba6f\nx label Agent\ny label 处理时长 (秒)\nlegend",
+  "stats": {
+    "incident_id": "INC-58cb7aedba6f",
+    "summary": "",
+    "events_count": 1,
+    "agents": [
+      "Ops-Agent",
+      "SRE-Agent",
+      "Code-Agent"
+    ],
+    "report_length": 2478
+  },
+  "render_config": {
+    "theme": "dark",
+    "colors": [
+      "#00d4ff",
+      "#ff6b9d",
+      "#00f5d4",
+      "#a78bfa",
+      "#fbbf24",
+      "#f87171",
+      "#4ade80"
+    ]
+  }
+}

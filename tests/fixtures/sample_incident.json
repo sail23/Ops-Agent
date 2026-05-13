@@ -1,0 +1,7 @@
+{
+  "incident_id": "CLI-JSON-1",
+  "trace_id": "trace-cli",
+  "device_id": "h1",
+  "metric_type": "mem",
+  "value": 80
+}

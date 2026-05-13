@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>故障诊断可视化 - GPT-Vis</title>
+    <style>
+        :root {
+            --bg-deep: #0a0f1e;
+            --bg-surface: #111827;
+            --bg-card: rgba(20, 32, 58, 0.8);
+            --border-glow: rgba(99, 179, 237, 0.15);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --accent-ops: #00d4ff;
+            --accent-sre: #ff6b9d;
+            --accent-code: #00f5d4;
+            --accent-report: #a78bfa;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: rgba(15, 25, 50, 0.95);
+            padding: 16px 28px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+            background: linear-gradient(90deg, var(--accent-ops), var(--accent-report));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-nav {
+            display: flex;
+            gap: 16px;
+        }
+
+        .nav-link {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            color: var(--accent-ops);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .main-container {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .card-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-title .icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+
+        .incident-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .incident-item {
+            padding: 10px 12px;
+            background: rgba(30, 45, 80, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .incident-item:hover, .incident-item.selected {
+            border-color: var(--accent-ops);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .incident-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .incident-id {
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--accent-ops);
+        }
+
+        .incident-severity {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .severity-P1 { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+        .severity-P2 { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        .severity-P3 { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
+
+        .incident-summary {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .metric-box {
+            padding: 12px;
+            background: rgba(30, 45, 80, 0.4);
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-family: 'Consolas', monospace;
+        }
+
+        .metric-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .visualization-area {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .viz-tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 12px;
+        }
+
+        .viz-tab {
+            padding: 8px 16px;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .viz-tab:hover, .viz-tab.active {
+            border-color: var(--accent-ops);
+            color: var(--accent-ops);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .viz-container {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            min-height: 500px;
+            position: relative;
+        }
+
+        .viz-header {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .viz-title {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .viz-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .viz-btn {
+            padding: 6px 12px;
+            background: rgba(30, 45, 80, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .viz-btn:hover {
+            border-color: var(--accent-ops);
+            color: var(--accent-ops);
+        }
+
+        #gpt-vis-container {
+            padding: 20px;
+            min-height: 400px;
+        }
+
+        .empty-viz {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            color: var(--text-secondary);
+            gap: 16px;
+        }
+
+        .empty-viz .icon {
+            font-size: 48px;
+            opacity: 0.5;
+        }
+
+        /* GPT-Vis 渲染区域 */
+        .gpt-vis-wrapper {
+            width: 100%;
+            height: 100%;
+        }
+
+        .gpt-vis-error {
+            padding: 20px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            color: #f87171;
+            text-align: center;
+        }
+
+        .gpt-vis-error h3 { margin-bottom: 8px; }
+        .gpt-vis-error small { color: var(--text-secondary); display: block; margin-top: 8px; }
+
+        .gpt-vis-info {
+            padding: 20px;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            color: #60a5fa;
+            text-align: center;
+        }
+
+        /* 辩论视图样式 */
+        .debate-container {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .debate-agents-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(20, 32, 58, 0.6);
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+
+        .debate-agent-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            background: rgba(30, 45, 80, 0.4);
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: default;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .debate-agent-btn .agent-icon { font-size: 16px; display: block; }
+        .debate-agent-btn .agent-name { font-size: 11px; margin-top: 4px; opacity: 0.8; }
+
+        .debate-agent-btn.active {
+            color: #fff;
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+        }
+
+        .debate-agent-btn.ops.active {
+            border-color: var(--accent-ops);
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.3), rgba(0, 153, 204, 0.2));
+        }
+
+        .debate-agent-btn.sre.active {
+            border-color: var(--accent-sre);
+            background: linear-gradient(135deg, rgba(255, 107, 157, 0.3), rgba(204, 68, 119, 0.2));
+        }
+
+        .debate-agent-btn.code.active {
+            border-color: var(--accent-code);
+            background: linear-gradient(135deg, rgba(0, 245, 212, 0.3), rgba(0, 187, 153, 0.2));
+        }
+
+        .debate-agent-btn.report.active {
+            border-color: var(--accent-report);
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.3), rgba(136, 102, 221, 0.2));
+        }
+
+        .debate-turns-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 60vh;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+
+        .debate-turn-bubble {
+            display: flex;
+            gap: 12px;
+            animation: bubbleIn 0.3s ease-out;
+        }
+
+        @keyframes bubbleIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .debate-turn-bubble.right {
+            flex-direction: row-reverse;
+        }
+
+        .debate-bubble-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+            align-self: flex-start;
+        }
+
+        .debate-bubble-avatar.ops { background: linear-gradient(135deg, var(--accent-ops), #0099cc); }
+        .debate-bubble-avatar.sre { background: linear-gradient(135deg, var(--accent-sre), #cc4477); }
+        .debate-bubble-avatar.code { background: linear-gradient(135deg, var(--accent-code), #00bb99); }
+        .debate-bubble-avatar.report { background: linear-gradient(135deg, var(--accent-report), #8866dd); }
+
+        .debate-bubble-content {
+            flex: 1;
+            max-width: 75%;
+        }
+
+        .debate-bubble-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .debate-bubble-header .speaker-name {
+            font-weight: 600;
+        }
+
+        .debate-bubble-header .speaker-name.ops { color: var(--accent-ops); }
+        .debate-bubble-header .speaker-name.sre { color: var(--accent-sre); }
+        .debate-bubble-header .speaker-name.code { color: var(--accent-code); }
+        .debate-bubble-header .speaker-name.report { color: var(--accent-report); }
+
+        .debate-bubble-header .turn-number {
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .debate-bubble-body {
+            background: rgba(30, 45, 80, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .debate-bubble-body.reasoning {
+            background: rgba(20, 30, 60, 0.6);
+            border-style: dashed;
+            border-color: rgba(255, 255, 255, 0.12);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .debate-bubble-body .streaming-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 14px;
+            background: var(--accent-ops);
+            animation: blink 0.8s infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .debate-pause-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .debate-pause-overlay.visible { display: flex; }
+
+        .debate-pause-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 32px 40px;
+            max-width: 480px;
+            text-align: center;
+        }
+
+        .debate-pause-card h3 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #fbbf24;
+        }
+
+        .debate-pause-card p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .debate-pause-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .debate-pause-btn {
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .debate-pause-btn.approve {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #fff;
+        }
+
+        .debate-pause-btn.reject {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        .debate-complete-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(20, 32, 58, 0.4);
+            border-radius: 10px;
+            margin-top: 8px;
+        }
+
+        .export-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .export-btn.word {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+        }
+
+        .export-btn.pdf {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: #fff;
+        }
+
+        .export-btn.html {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        .export-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* 故障流程时间线样式 */
+        .timeline-container {
+            padding: 20px;
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 16px;
+            padding: 16px 0;
+            position: relative;
+        }
+
+        .timeline-marker {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        .timeline-marker.ops { background: linear-gradient(135deg, var(--accent-ops), #0099cc); }
+        .timeline-marker.sre { background: linear-gradient(135deg, var(--accent-sre), #cc4477); }
+        .timeline-marker.code { background: linear-gradient(135deg, var(--accent-code), #00bb99); }
+        .timeline-marker.report { background: linear-gradient(135deg, var(--accent-report), #8866dd); }
+
+        .timeline-content {
+            flex: 1;
+            background: rgba(30, 45, 80, 0.4);
+            border-radius: 8px;
+            padding: 12px 16px;
+        }
+
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .timeline-agent {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .timeline-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-family: 'Consolas', monospace;
+        }
+
+        .timeline-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* 因果链可视化 */
+        .causal-chain {
+            padding: 20px;
+        }
+
+        .causal-node {
+            padding: 12px 16px;
+            background: rgba(30, 45, 80, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .causal-node.root-cause {
+            border-color: #f87171;
+            background: rgba(248, 113, 113, 0.1);
+        }
+
+        .causal-node.symptom {
+            border-color: #fbbf24;
+            background: rgba(251, 191, 36, 0.1);
+        }
+
+        .causal-node.service {
+            border-color: var(--accent-ops);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .causal-arrow {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 20px;
+            margin: -4px 0;
+        }
+
+        /* 统计图表区域 */
+        .stats-charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            padding: 20px;
+        }
+
+        .chart-box {
+            background: rgba(30, 45, 80, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .chart-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .bar-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .bar-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .bar-label {
+            width: 80px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .bar-track {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .bar-fill.ops { background: var(--accent-ops); }
+        .bar-fill.sre { background: var(--accent-sre); }
+        .bar-fill.code { background: var(--accent-code); }
+        .bar-fill.report { background: var(--accent-report); }
+
+        .bar-value {
+            width: 40px;
+            font-size: 11px;
+            font-family: 'Consolas', monospace;
+            text-align: right;
+        }
+
+        /* 加载状态 */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            gap: 12px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            border-top-color: var(--accent-ops);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 辩论视图样式 */
+        .debate-container {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .debate-agents-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(20, 32, 58, 0.6);
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+
+        .debate-agent-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            background: rgba(30, 45, 80, 0.4);
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: default;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .debate-agent-btn .agent-icon { font-size: 16px; display: block; }
+        .debate-agent-btn .agent-name { font-size: 11px; margin-top: 4px; opacity: 0.8; }
+
+        .debate-agent-btn.active {
+            color: #fff;
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+        }
+
+        .debate-agent-btn.ops.active {
+            border-color: var(--accent-ops);
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.3), rgba(0, 153, 204, 0.2));
+        }
+
+        .debate-agent-btn.sre.active {
+            border-color: var(--accent-sre);
+            background: linear-gradient(135deg, rgba(255, 107, 157, 0.3), rgba(204, 68, 119, 0.2));
+        }
+
+        .debate-agent-btn.code.active {
+            border-color: var(--accent-code);
+            background: linear-gradient(135deg, rgba(0, 245, 212, 0.3), rgba(0, 187, 153, 0.2));
+        }
+
+        .debate-agent-btn.report.active {
+            border-color: var(--accent-report);
+            background: linear-gradient(135deg, rgba(167, 139, 250, 0.3), rgba(136, 102, 221, 0.2));
+        }
+
+        .debate-turns-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 60vh;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+
+        .debate-turn-bubble {
+            display: flex;
+            gap: 12px;
+            animation: bubbleIn 0.3s ease-out;
+        }
+
+        @keyframes bubbleIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .debate-turn-bubble.right {
+            flex-direction: row-reverse;
+        }
+
+        .debate-bubble-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+            align-self: flex-start;
+        }
+
+        .debate-bubble-avatar.ops { background: linear-gradient(135deg, var(--accent-ops), #0099cc); }
+        .debate-bubble-avatar.sre { background: linear-gradient(135deg, var(--accent-sre), #cc4477); }
+        .debate-bubble-avatar.code { background: linear-gradient(135deg, var(--accent-code), #00bb99); }
+        .debate-bubble-avatar.report { background: linear-gradient(135deg, var(--accent-report), #8866dd); }
+
+        .debate-bubble-content {
+            flex: 1;
+            max-width: 75%;
+        }
+
+        .debate-bubble-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .debate-bubble-header .speaker-name {
+            font-weight: 600;
+        }
+
+        .debate-bubble-header .speaker-name.ops { color: var(--accent-ops); }
+        .debate-bubble-header .speaker-name.sre { color: var(--accent-sre); }
+        .debate-bubble-header .speaker-name.code { color: var(--accent-code); }
+        .debate-bubble-header .speaker-name.report { color: var(--accent-report); }
+
+        .debate-bubble-header .turn-number {
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .debate-bubble-body {
+            background: rgba(30, 45, 80, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .debate-bubble-body.reasoning {
+            background: rgba(20, 30, 60, 0.6);
+            border-style: dashed;
+            border-color: rgba(255, 255, 255, 0.12);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .debate-bubble-body .streaming-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 14px;
+            background: var(--accent-ops);
+            animation: blink 0.8s infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .debate-pause-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .debate-pause-overlay.visible { display: flex; }
+
+        .debate-pause-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 16px;
+            padding: 32px 40px;
+            max-width: 480px;
+            text-align: center;
+        }
+
+        .debate-pause-card h3 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #fbbf24;
+        }
+
+        .debate-pause-card p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .debate-pause-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .debate-pause-btn {
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .debate-pause-btn.approve {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            color: #fff;
+        }
+
+        .debate-pause-btn.reject {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        .debate-complete-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(20, 32, 58, 0.4);
+            border-radius: 10px;
+            margin-top: 8px;
+        }
+
+        .export-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .export-btn.word {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #fff;
+        }
+
+        .export-btn.pdf {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: #fff;
+        }
+
+        .export-btn.html {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+        }
+
+        .export-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .gpt-vis-error {
+            color: #f87171;
+            text-align: center;
+            padding: 24px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+    </style>
+    <!-- @antv/gpt-vis UMD 依赖（与包 peer/externals 一致）；主脚本为 dist/umd/index.min.js，旧路径 gpt-vis.umd.min.js 在 npm 上不存在 -->
+    <link rel="stylesheet" href="https://unpkg.com/mapbox-gl@3.10.0/dist/mapbox-gl.css" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://unpkg.com/@antv/gpt-vis@0.6.1/dist/umd/index.min.css" crossorigin="anonymous" />
+</head>
+<body>
+    <header class="header">
+        <div class="header-title">故障诊断可视化</div>
+        <nav class="header-nav">
+            <a href="/" class="nav-link">返回控制台</a>
+            <a href="/visualization" class="nav-link active">可视化分析</a>
+        </nav>
+    </header>
+
+    <main class="main-container">
+        <aside class="sidebar">
+            <div class="card">
+                <div class="card-title">
+                    <span class="icon" style="background: rgba(0, 212, 255, 0.2); color: var(--accent-ops);">📊</span>
+                    统计概览
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <div class="metric-value" id="total-cases">0</div>
+                        <div class="metric-label">总案例数</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-value" id="total-traces">0</div>
+                        <div class="metric-label">链路数</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-value" id="error-rate">0%</div>
+                        <div class="metric-label">错误率</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-value" id="avg-duration">0ms</div>
+                        <div class="metric-label">平均耗时</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span class="icon" style="background: rgba(167, 139, 250, 0.2); color: var(--accent-report);">📋</span>
+                    故障案例
+                </div>
+                <div class="incident-list" id="incident-list">
+                    <div class="incident-item" onclick="selectIncident('INC-DEMO')">
+                        <div class="incident-item-header">
+                            <span class="incident-id">INC-DEMO</span>
+                            <span class="incident-severity severity-P2">P2</span>
+                        </div>
+                        <div class="incident-summary">数据库连接超时，订单服务不可用</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <section class="visualization-area">
+            <div class="viz-tabs">
+                <button type="button" class="viz-tab active" onclick="switchTab('timeline', this)">诊断流程</button>
+                <button type="button" class="viz-tab" onclick="switchTab('causal', this)">因果链路</button>
+                <button type="button" class="viz-tab" onclick="switchTab('stats', this)">统计分析</button>
+                <button type="button" class="viz-tab" onclick="switchTab('gptvis', this)">GPT-Vis</button>
+                <button type="button" class="viz-tab" onclick="switchTab('debate', this)">辩论视图</button>
+            </div>
+
+            <div class="viz-container">
+                <div class="viz-header">
+                    <div class="viz-title" id="viz-title">故障诊断流程时间线</div>
+                    <div class="viz-actions">
+                        <button class="viz-btn" onclick="refreshViz()">🔄 刷新</button>
+                        <button class="viz-btn" onclick="exportViz()">📥 导出</button>
+                    </div>
+                </div>
+
+                <div id="viz-content">
+                    <div class="timeline-container" id="timeline-view">
+                        <div class="timeline-item">
+                            <div class="timeline-marker ops">⚡</div>
+                            <div class="timeline-content">
+                                <div class="timeline-header">
+                                    <span class="timeline-agent" style="color: var(--accent-ops)">Ops-Agent</span>
+                                    <span class="timeline-time">00:00:00</span>
+                                </div>
+                                <div class="timeline-text">
+                                    接收告警：数据库连接超时<br>
+                                    触发指标：db.connection.timeout = 5000
+                                </div>
+                            </div>
+                        </div>
+                        <div class="timeline-item">
+                            <div class="timeline-marker sre">🔍</div>
+                            <div class="timeline-content">
+                                <div class="timeline-header">
+                                    <span class="timeline-agent" style="color: var(--accent-sre)">SRE-Agent</span>
+                                    <span class="timeline-time">00:00:02</span>
+                                </div>
+                                <div class="timeline-text">
+                                    分析结果：连接池耗尽，疑似慢查询堆积<br>
+                                    影响范围：订单服务、支付服务
+                                </div>
+                            </div>
+                        </div>
+                        <div class="timeline-item">
+                            <div class="timeline-marker code">💻</div>
+                            <div class="timeline-content">
+                                <div class="timeline-header">
+                                    <span class="timeline-agent" style="color: var(--accent-code)">Code-Agent</span>
+                                    <span class="timeline-time">00:00:05</span>
+                                </div>
+                                <div class="timeline-text">
+                                    生成诊断脚本：<br>
+                                    <code style="color: var(--accent-code)">./check_db_connections.sh</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="timeline-item">
+                            <div class="timeline-marker report">📊</div>
+                            <div class="timeline-content">
+                                <div class="timeline-header">
+                                    <span class="timeline-agent" style="color: var(--accent-report)">Report-Agent</span>
+                                    <span class="timeline-time">00:00:08</span>
+                                </div>
+                                <div class="timeline-text">
+                                    生成故障报告：INC-DEMO-001<br>
+                                    根因：数据库连接池配置过小，慢查询未设置超时
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="causal-chain" id="causal-view" style="display: none;">
+                        <div class="causal-node root-cause">
+                            <strong>根因</strong><br>
+                            数据库连接池配置过小（max_connections=50）
+                        </div>
+                        <div class="causal-arrow">↓</div>
+                        <div class="causal-node symptom">
+                            <strong>症状</strong><br>
+                            连接等待超时，请求堆积
+                        </div>
+                        <div class="causal-arrow">↓</div>
+                        <div class="causal-node service">
+                            <strong>影响服务</strong><br>
+                            订单服务 → 支付服务 → 用户服务
+                        </div>
+                    </div>
+
+                    <div class="stats-charts" id="stats-view" style="display: none;">
+                        <div class="chart-box">
+                            <div class="chart-title">各 Agent 处理时长</div>
+                            <div class="bar-chart">
+                                <div class="bar-item">
+                                    <span class="bar-label">Ops-Agent</span>
+                                    <div class="bar-track"><div class="bar-fill ops" style="width: 85%"></div></div>
+                                    <span class="bar-value">2.1s</span>
+                                </div>
+                                <div class="bar-item">
+                                    <span class="bar-label">SRE-Agent</span>
+                                    <div class="bar-track"><div class="bar-fill sre" style="width: 92%"></div></div>
+                                    <span class="bar-value">3.8s</span>
+                                </div>
+                                <div class="bar-item">
+                                    <span class="bar-label">Code-Agent</span>
+                                    <div class="bar-track"><div class="bar-fill code" style="width: 78%"></div></div>
+                                    <span class="bar-value">1.5s</span>
+                                </div>
+                                <div class="bar-item">
+                                    <span class="bar-label">Report-Agent</span>
+                                    <div class="bar-track"><div class="bar-fill report" style="width: 65%"></div></div>
+                                    <span class="bar-value">0.8s</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chart-box">
+                            <div class="chart-title">错误分布</div>
+                            <div class="bar-chart">
+                                <div class="bar-item">
+                                    <span class="bar-label">数据库</span>
+                                    <div class="bar-track"><div class="bar-fill ops" style="width: 45%"></div></div>
+                                    <span class="bar-value">45%</span>
+                                </div>
+                                <div class="bar-item">
+                                    <span class="bar-label">网络</span>
+                                    <div class="bar-track"><div class="bar-fill sre" style="width: 25%"></div></div>
+                                    <span class="bar-value">25%</span>
+                                </div>
+                                <div class="bar-item">
+                                    <span class="bar-label">应用</span>
+                                    <div class="bar-track"><div class="bar-fill code" style="width: 20%"></div></div>
+                                    <span class="bar-value">20%</span>
+                                </div>
+                                <div class="bar-item">
+                                    <span class="bar-label">其他</span>
+                                    <div class="bar-track"><div class="bar-fill report" style="width: 10%"></div></div>
+                                    <span class="bar-value">10%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="gptvis-view" style="display: none; padding: 20px;">
+                        <div class="empty-viz">
+                            <div class="icon">📈</div>
+                            <p>GPT-Vis 可视化区域</p>
+                            <p style="font-size: 12px;">加载 @antv/gpt-vis 渲染动态图表</p>
+                            <div id="gpt-vis-container" style="width: 100%; height: 300px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/lodash@4.17.21/lodash.min.js"></script>
+    <script src="https://unpkg.com/mapbox-gl@3.10.0/dist/mapbox-gl.js"></script>
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/@antv/gpt-vis@0.6.1/dist/umd/index.min.js"></script>
+    <script>
+        // 确保全局变量名与 GPT-Vis UMD 期望的一致
+        window.React = window.React || window.React;
+        window.ReactDOM = window.ReactDOM || window.ReactDOM;
+        window._ = window._ || window.lodash;
+
+        const API_BASE = '/api/v1';
+
+        let currentTab = 'timeline';
+        let currentIncident = null;
+        let gptVisInitAttempts = 0;
+        const GPTVIS_MAX_ATTEMPTS = 20;
+        let gptVisInstance = null;
+
+        // Tab 切换
+        function switchTab(tab, el) {
+            currentTab = tab;
+            const target = el || (typeof event !== 'undefined' ? event.target : null);
+            document.querySelectorAll('.viz-tab').forEach(t => t.classList.remove('active'));
+            if (target && target.classList) target.classList.add('active');
+
+            document.getElementById('timeline-view').style.display = tab === 'timeline' ? 'block' : 'none';
+            document.getElementById('causal-view').style.display = tab === 'causal' ? 'block' : 'none';
+            document.getElementById('stats-view').style.display = tab === 'stats' ? 'grid' : 'none';
+            document.getElementById('gptvis-view').style.display = tab === 'gptvis' ? 'block' : 'none';
+
+            const titles = {
+                timeline: '故障诊断流程时间线',
+                causal: '因果传播链路',
+                stats: 'Agent 性能统计',
+                gptvis: 'GPT-Vis 动态图表'
+            };
+            document.getElementById('viz-title').textContent = titles[tab];
+
+            if (tab === 'gptvis') {
+                initGPTVis();
+            }
+        }
+
+        /** UMD 包挂在 window.GPTVis 上的是模块命名空间，类为 .GPTVis */
+        function getGPTVisConstructor() {
+            const mod = window.GPTVis;
+            if (!mod) return null;
+            // GPT-Vis 可能需要通过 ReactDOM.render 方式使用
+            return mod.GPTVis || mod.default || mod;
+        }
+
+        function depsReadyForGPTVis() {
+            return !!(window.React && window.ReactDOM && typeof window._ !== 'undefined'
+                && window.mapboxgl && window.maplibregl);
+        }
+
+        // 初始化 GPT-Vis
+        function initGPTVis() {
+            const container = document.getElementById('gpt-vis-container');
+            if (!container) return;
+
+            const Ctor = getGPTVisConstructor();
+            if (!depsReadyForGPTVis() || !Ctor) {
+                gptVisInitAttempts += 1;
+                if (gptVisInitAttempts > GPTVIS_MAX_ATTEMPTS) {
+                    container.innerHTML = `
+                        <div class="gpt-vis-error">
+                            <h3>GPT-Vis 加载失败</h3>
+                            <p>依赖库未能成功加载，请检查网络连接。</p>
+                            <p><small>依赖状态：React ${!!window.React}, ReactDOM ${!!window.ReactDOM}, lodash ${!!window._}, mapboxgl ${!!window.mapboxgl}, maplibregl ${!!window.maplibregl}</small></p>
+                        </div>
+                    `;
+                    return;
+                }
+                container.innerHTML = '<p style="color: var(--text-secondary); text-align: center;">GPT-Vis 加载中... (尝试 ' + gptVisInitAttempts + ')</p>';
+                setTimeout(initGPTVis, 500);
+                return;
+            }
+
+            gptVisInitAttempts = 0;
+
+            // 清理旧实例
+            if (gptVisInstance) {
+                try {
+                    if (typeof gptVisInstance.destroy === 'function') gptVisInstance.destroy();
+                    else if (window.ReactDOM && typeof window.ReactDOM.unmountComponentAtNode === 'function') {
+                        window.ReactDOM.unmountComponentAtNode(container);
+                    }
+                } catch (_) {}
+                gptVisInstance = null;
+            }
+            container.innerHTML = '';
+
+            // 测试数据
+            const testData = {
+                "type": "line",
+                "data": {
+                    "xField": "time",
+                    "yField": "value",
+                    "seriesField": "agent",
+                    "data": [
+                        {"time": "00:00", "value": 100, "agent": "ops"},
+                        {"time": "00:01", "value": 150, "agent": "sre"},
+                        {"time": "00:02", "value": 120, "agent": "code"},
+                    ]
+                }
+            };
+
+            try {
+                console.log('=== GPT-Vis Debug ===');
+                console.log('Constructor type:', typeof Ctor);
+                console.log('Constructor keys:', Ctor ? Object.keys(Ctor).slice(0, 20) : 'none');
+
+                // 方法 1: 如果是函数构造函数
+                if (typeof Ctor === 'function') {
+                    gptVisInstance = new Ctor({
+                        container: container,
+                    });
+
+                    console.log('Instance type:', typeof gptVisInstance);
+                    console.log('Instance keys:', gptVisInstance ? Object.keys(gptVisInstance).slice(0, 20) : 'none');
+
+                    if (typeof gptVisInstance.render === 'function') {
+                        gptVisInstance.render(markdownContent.trim());
+                    } else if (typeof gptVisInstance.update === 'function') {
+                        gptVisInstance.update(testData);
+                    } else {
+                        container.innerHTML = '<div class="gpt-vis-info">GPT-Vis 已加载但 API 未知<br><small>实例: ' + Object.keys(gptVisInstance || {}).join(', ') + '</small></div>';
+                    }
+                } else if (typeof Ctor === 'object' && Ctor !== null) {
+                    // 方法 2: 可能是直接可用的对象
+                    console.log('Ctor is object, type:', Ctor.render ? 'has render' : 'no render');
+
+                    if (typeof Ctor.render === 'function') {
+                        const node = document.createElement('div');
+                        container.appendChild(node);
+                        Ctor.render(node, markdownContent.trim());
+                    } else if (typeof Ctor.createChart === 'function') {
+                        Ctor.createChart(container, testData);
+                    } else {
+                        container.innerHTML = '<div class="gpt-vis-info">GPT-Vis 模块已加载<br><small>可用: ' + Object.keys(Ctor).slice(0, 10).join(', ') + '</small></div>';
+                    }
+                }
+            } catch (e) {
+                console.error('GPT-Vis error:', e);
+                container.innerHTML = '<div class="gpt-vis-error">GPT-Vis 错误: ' + (e.message || String(e)) + '</div>';
+            }
+        }
+
+        // Markdown 内容（GPT-Vis 格式）
+        const markdownContent = `
+\`\`\`vis-chart
+{"type":"line","data":[{"time":"00:00","ops":100,"sre":320,"code":180},{"time":"00:01","ops":95,"sre":280,"code":150},{"time":"00:02","ops":88,"sre":350,"code":200}]}
+\`\`\`
+`;
+
+        // 刷新可视化
+        async function refreshViz() {
+            await loadStats();
+            await loadIncidents();
+            if (currentTab === 'gptvis') {
+                gptVisInitAttempts = 0;
+                initGPTVis();
+            }
+        }
+
+        // 导出可视化
+        function exportViz() {
+            const content = document.getElementById('viz-content').innerHTML;
+            const blob = new Blob([content], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `fault-visualization-${Date.now()}.html`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // 加载统计数据
+        async function loadStats() {
+            try {
+                const resp = await fetch(`${API_BASE}/knowledge/stats`);
+                if (resp.ok) {
+                    const stats = await resp.json();
+                    document.getElementById('total-cases').textContent = stats.total_cases || 0;
+                }
+            } catch (e) {
+                console.error('Failed to load stats:', e);
+            }
+
+            // 模拟链路数据
+            document.getElementById('total-traces').textContent = '24';
+            document.getElementById('error-rate').textContent = '15%';
+            document.getElementById('avg-duration').textContent = '250ms';
+        }
+
+        // 加载故障案例列表
+        async function loadIncidents() {
+            try {
+                const resp = await fetch(`${API_BASE}/knowledge/cases?limit=20`);
+                if (resp.ok) {
+                    const cases = await resp.json();
+                    const list = document.getElementById('incident-list');
+                    list.innerHTML = '';
+
+                    cases.forEach(c => {
+                        const item = document.createElement('div');
+                        item.className = 'incident-item' + (currentIncident === c.case_id ? ' selected' : '');
+                        item.onclick = () => selectIncident(c.case_id);
+
+                        const severity = c.severity || 'P3';
+                        item.innerHTML = `
+                            <div class="incident-item-header">
+                                <span class="incident-id">${c.case_id}</span>
+                                <span class="incident-severity severity-${severity}">${severity}</span>
+                            </div>
+                            <div class="incident-summary">${c.summary || c.title || '无描述'}</div>
+                        `;
+                        list.appendChild(item);
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to load incidents:', e);
+            }
+        }
+
+        // 选择故障案例
+        async function selectIncident(caseId) {
+            currentIncident = caseId;
+            document.querySelectorAll('.incident-item').forEach(i => i.classList.remove('selected'));
+            event.target.closest('.incident-item').classList.add('selected');
+
+            // 更新可视化内容
+            try {
+                const resp = await fetch(`${API_BASE}/knowledge/cases/${caseId}`);
+                if (resp.ok) {
+                    const caseDetail = await resp.json();
+                    updateVisualization(caseDetail);
+                }
+            } catch (e) {
+                console.error('Failed to load case detail:', e);
+            }
+        }
+
+        // 更新可视化内容
+        function updateVisualization(caseDetail) {
+            // 更新时间线
+            const timelineView = document.getElementById('timeline-view');
+            timelineView.innerHTML = `
+                <div class="timeline-item">
+                    <div class="timeline-marker report">📋</div>
+                    <div class="timeline-content">
+                        <div class="timeline-header">
+                            <span class="timeline-agent" style="color: var(--accent-report)">故障案例</span>
+                            <span class="timeline-time">${caseDetail.case_id}</span>
+                        </div>
+                        <div class="timeline-text">
+                            <strong>${caseDetail.title || '无标题'}</strong><br>
+                            ${caseDetail.summary || '无描述'}<br>
+                            ${caseDetail.root_cause ? '<br>根因: ' + caseDetail.root_cause : ''}
+                            ${caseDetail.resolution ? '<br>解决方案: ' + caseDetail.resolution : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // 更新因果链
+            if (caseDetail.root_cause || caseDetail.symptoms?.length) {
+                const causalView = document.getElementById('causal-view');
+                causalView.innerHTML = `
+                    ${caseDetail.root_cause ? `
+                    <div class="causal-node root-cause">
+                        <strong>根因</strong><br>
+                        ${caseDetail.root_cause}
+                    </div>
+                    <div class="causal-arrow">↓</div>
+                    ` : ''}
+                    ${caseDetail.symptoms?.length ? `
+                    <div class="causal-node symptom">
+                        <strong>症状</strong><br>
+                        ${caseDetail.symptoms.slice(0, 3).join('<br>')}
+                    </div>
+                    <div class="causal-arrow">↓</div>
+                    ` : ''}
+                    ${caseDetail.services?.length ? `
+                    <div class="causal-node service">
+                        <strong>影响服务</strong><br>
+                        ${caseDetail.services.join(' → ')}
+                    </div>
+                    ` : ''}
+                `;
+            }
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            loadIncidents();
+        });
+    </script>
+</body>
+</html>

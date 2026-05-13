@@ -1,0 +1,497 @@
+---
+description: Prometheus 监控接入后的完整故障处理流程开发计划
+alwaysApply: false
+---
+
+# Prometheus 接入开发计划
+
+本文档描述接入 Prometheus 监控后，系统的完整故障处理流程。
+
+---
+
+## 一、Prometheus 接入概述
+
+### 1.1 配置参数
+
+```python
+@dataclass
+class PrometheusConfig:
+    # 连接配置
+    base_url: str = "http://localhost:9090"
+
+    # 认证方式
+    auth_type: Literal["none", "bearer", "basic", "mtls"] = "none"
+    token: str | None = None
+    username: str | None = None
+    password: str | None = None
+    tls_cert: str | None = None
+    tls_key: str | None = None
+
+    # 查询配置
+    timeout: int = 30
+    max_retries: int = 3
+
+    # 告警配置
+    alertmanager_url: str | None = None
+```
+
+### 1.2 依赖
+
+```bash
+# requirements.txt 添加
+httpx>=0.25.0
+prometheus-api-client>=0.19.0
+```
+
+---
+
+## 二、完整故障处理流程
+
+```mermaid
+flowchart TB
+    subgraph Alert["告警采集"]
+        P[Prometheus<br/>监控指标] --> A[Alertmanager<br/>告警触发]
+        A --> W[Webhook<br/>告警事件]
+    end
+
+    subgraph Ops["OpsAgent 初步判断"]
+        W --> O1[接收告警事件]
+        O1 --> O2[prometheus_alerts<br/>查询告警状态]
+        O2 --> O3[prometheus_query<br/>查询相关指标]
+        O3 --> O4{告警关联性分析}
+        O4 -->|高优先级| S[升级 SREAgent]
+        O4 -->|低优先级| R[自动修复]
+        O4 -->|误报| D[标记忽略]
+    end
+
+    subgraph SRE["SREAgent 架构分析"]
+        S --> S1[Graph RAG<br/>检索相似故障]
+        S1 --> S2[metrics_summary<br/>生成诊断 PromQL]
+        S2 --> S3[prometheus_query_range<br/>获取指标趋势]
+        S3 --> S4[根因分析]
+        S4 --> S5[生成处置方案]
+    end
+
+    subgraph Code["CodeAgent 诊断脚本"]
+        S5 --> C1[生成诊断脚本]
+        C1 --> C2[安全执行<br/>围栏检查]
+        C2 --> C3[返回诊断结果]
+    end
+
+    subgraph Report["ReportAgent 报告生成"]
+        C3 --> E1[汇总分析结果]
+        E1 --> E2[生成 Markdown]
+        E2 --> E3[Webhook 通知]
+    end
+
+    Ops --> SRE
+    SRE --> Code
+    Code --> Report
+```
+
+---
+
+## 三、各阶段详细说明
+
+### 3.1 告警采集阶段
+
+```
+Prometheus ──告警规则触发──▶ Alertmanager ──Webhook──▶ 告警事件
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │ EventObject     │
+                          │ • metric_type   │
+                          │ • value         │
+                          │ • device_id     │
+                          │ • timestamp     │
+                          │ • labels        │
+                          └─────────────────┘
+```
+
+**数据映射**：
+- Prometheus 告警 → `EventObject`
+- `metric_name` = 告警名
+- `severity` = 告警级别 (critical/warning/info)
+- `labels` = Prometheus labels
+
+### 3.2 OpsAgent 初步判断阶段
+
+```
+输入: 告警事件 + Prometheus 查询结果
+│
+├── prometheus_alerts(alert_state="firing")
+│   └── 获取当前 firing 状态的告警
+│
+├── prometheus_query(query='rate(http_requests_total[5m])')
+│   └── 查询相关指标当前值
+│
+└── 输出: 初步判断结论
+    ├── 告警关联性分析
+    ├── 影响范围评估
+    └── 建议: 升级 SRE / 忽略 / 自动修复
+```
+
+### 3.3 SREAgent 架构分析阶段
+
+```
+输入: Ops 输出 + Graph RAG 案例 + Prometheus 指标
+│
+├── Graph RAG 检索相似故障
+│   └── similar_incidents(incident)
+│
+├── metrics_summary 生成诊断 PromQL
+│   ├── CPU: rate(node_cpu_seconds_total{mode!="idle"}[5m])
+│   ├── 内存: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100
+│   └── 网络: rate(node_network_receive_bytes_total[5m])
+│
+├── prometheus_query_range 查询指标趋势
+│   └── query_range(query, start, end, step="1m")
+│
+└── 输出: 处置方案
+    ├── 根因分析
+    ├── 处置步骤
+    └── 回滚方案
+```
+
+### 3.4 CodeAgent 诊断脚本阶段
+
+```
+输入: SRE 方案 + 指标数据
+│
+├── 生成诊断脚本
+│   └── 根据 PromQL 查询结果生成分析代码
+│
+├── 安全执行（高危命令拦截）
+│
+└── 输出: 诊断结果 + 建议操作
+```
+
+### 3.5 ReportAgent 报告生成阶段
+
+```
+输入: 所有 Agent 输出 + 指标数据
+│
+├── 生成 Markdown 报告
+│   ├── 时间线
+│   ├── 根因分析
+│   ├── 指标趋势（Prometheus 图表）
+│   └── 处置记录
+│
+├── Webhook 通知（钉钉/飞书/企业微信）
+│
+└── 导出选项
+    ├── Word (.docx)
+    ├── PDF (.pdf)
+    └── HTML
+```
+
+---
+
+## 四、Prometheus 工具定义
+
+### 4.1 prometheus_query
+
+查询单个时间点的指标值。
+
+```json
+{
+  "name": "prometheus_query",
+  "description": "执行 PromQL 查询，返回指标值",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "PromQL 查询语句",
+        "examples": [
+          "rate(http_requests_total{status='500'}[5m])",
+          "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100"
+        ]
+      },
+      "time": {
+        "type": "string",
+        "description": "查询时间点（ISO 8601 或 Unix 时间戳），默认为当前时间"
+      }
+    },
+    "required": ["query"]
+  }
+}
+```
+
+**返回示例**：
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "metric": {
+        "instance": "server-01:9100",
+        "job": "node_exporter"
+      },
+      "value": [1700000000, "85.5"]
+    }
+  ]
+}
+```
+
+### 4.2 prometheus_query_range
+
+查询时间范围内的指标值。
+
+```json
+{
+  "name": "prometheus_query_range",
+  "description": "执行范围 PromQL 查询，返回时间序列数据",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "PromQL 查询语句"
+      },
+      "start": {
+        "type": "string",
+        "description": "开始时间（ISO 8601 或 Unix 时间戳）"
+      },
+      "end": {
+        "type": "string",
+        "description": "结束时间（ISO 8601 或 Unix 时间戳）"
+      },
+      "step": {
+        "type": "string",
+        "description": "采样间隔（如 '1m', '5m', '1h'）",
+        "default": "1m"
+      }
+    },
+    "required": ["query", "start", "end"]
+  }
+}
+```
+
+### 4.3 prometheus_alerts
+
+查询当前告警状态。
+
+```json
+{
+  "name": "prometheus_alerts",
+  "description": "查询 Prometheus 告警状态",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "alert_state": {
+        "type": "string",
+        "description": "告警状态筛选",
+        "enum": ["firing", "pending", "inactive"],
+        "default": "firing"
+      },
+      "alert_name": {
+        "type": "string",
+        "description": "告警名称筛选（可选）"
+      }
+    }
+  }
+}
+```
+
+**返回示例**：
+```json
+{
+  "alerts": [
+    {
+      "name": "HighCPUUsage",
+      "state": "firing",
+      "severity": "critical",
+      "labels": {
+        "instance": "server-01",
+        "job": "node_exporter"
+      },
+      "annotations": {
+        "summary": "CPU 使用率超过 90%",
+        "description": "server-01 CPU 当前使用率: 95%"
+      },
+      "startsAt": "2024-01-15T10:00:00Z"
+    }
+  ]
+}
+```
+
+### 4.4 metrics_summary
+
+根据指标类型自动生成诊断 PromQL。
+
+```json
+{
+  "name": "metrics_summary",
+  "description": "生成指定指标的诊断 PromQL",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "metric_type": {
+        "type": "string",
+        "description": "指标类型",
+        "enum": ["cpu", "memory", "disk", "network", "http", "database"]
+      },
+      "instance": {
+        "type": "string",
+        "description": "实例名称（如 'server-01:9100'）"
+      },
+      "time_range": {
+        "type": "string",
+        "description": "时间范围",
+        "default": "5m"
+      }
+    },
+    "required": ["metric_type"]
+  }
+}
+```
+
+**自动生成 PromQL 示例**：
+
+| metric_type | 生成的 PromQL |
+|-------------|--------------|
+| cpu | `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)` |
+| memory | `(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100` |
+| disk | `100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100)` |
+| network | `rate(node_network_receive_bytes_total[5m])` |
+| http | `rate(http_requests_total{status=~"5.."}[5m])` |
+| database | `rate(postgresql_database_stat_numbackends[5m])` |
+
+---
+
+## 五、实现步骤
+
+### 步骤 1: Prometheus 配置与客户端
+
+**文件**: `src/power_aiops/integrations/prometheus.py`
+
+```python
+# 实现内容:
+# 1. PrometheusConfig 配置类
+# 2. PrometheusClient 客户端类
+#    - _query() 方法: 调用 /api/v1/query
+#    - _query_range() 方法: 调用 /api/v1/query_range
+#    - _alerts() 方法: 调用 /api/v1/alerts
+# 3. fetch_events() 函数: 从告警生成 EventObject
+# 4. map_prometheus_result_to_event() 辅助函数
+```
+
+### 步骤 2: 工具注册到 ToolRegistry
+
+**文件**: `src/power_aiops/agents/tools/registry.py`
+
+```python
+# 添加工具:
+# - prometheus_query
+# - prometheus_query_range
+# - prometheus_alerts
+# - metrics_summary
+```
+
+### 步骤 3: OpsAgent 集成查询
+
+**文件**: `src/power_aiops/agents/ops.py`
+
+```python
+# 修改内容:
+# 1. 导入 Prometheus 工具
+# 2. 在 run() 方法中调用 prometheus_alerts 获取告警状态
+# 3. 调用 prometheus_query 查询相关指标
+# 4. 基于指标数据进行初步判断
+```
+
+### 步骤 4: SREAgent 集成查询
+
+**文件**: `src/power_aiops/agents/sre.py`
+
+```python
+# 修改内容:
+# 1. 在 diagnose() 方法中调用 metrics_summary 生成诊断 PromQL
+# 2. 调用 prometheus_query_range 获取指标趋势
+# 3. 结合 Graph RAG 结果进行根因分析
+```
+
+### 步骤 5: 测试与验证
+
+```bash
+# 1. 单元测试
+pytest tests/integrations/test_prometheus.py
+
+# 2. 集成测试（需要 Prometheus 实例）
+# 启动 Prometheus + Alertmanager
+docker-compose up -d prometheus alertmanager
+
+# 3. 端到端测试
+python -m power_aiops run --demo
+```
+
+---
+
+## 六、文件结构
+
+```
+src/power_aiops/
+├── integrations/
+│   ├── __init__.py
+│   ├── prometheus.py          # [新增] Prometheus 客户端
+│   ├── elk.py                 # [已存在] ELK 接入（待实现）
+│   └── openrca.py             # [已存在] OpenRCA 数据集
+│
+├── agents/
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   ├── registry.py        # [修改] 添加 Prometheus 工具
+│   │   ├── prometheus_tools.py # [新增] Prometheus 工具定义
+│   │   └── ...
+│   ├── ops.py                 # [修改] 集成 Prometheus 查询
+│   ├── sre.py                 # [修改] 集成 Prometheus 查询
+│   └── ...
+│
+└── memory/
+    └── long_term.py           # [已存在] 长期记忆（Graph RAG）
+```
+
+---
+
+## 七、配置示例
+
+### .env 配置
+
+```bash
+# Prometheus 配置
+PROMETHEUS_BASE_URL=http://localhost:9090
+PROMETHEUS_AUTH_TYPE=bearer
+PROMETHEUS_TOKEN=your-bearer-token
+
+# 可选: Alertmanager Webhook
+ALERTMANAGER_URL=http://localhost:9093
+```
+
+### docker-compose.yml（本地测试）
+
+```yaml
+version: '3.8'
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+```
+
+---
+
+*文档版本：0.1.0*
+*更新时间：2026-04-10*
