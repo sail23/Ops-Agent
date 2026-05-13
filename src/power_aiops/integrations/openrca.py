@@ -250,7 +250,7 @@ class OpenRCAClient:
                 metric_type=f"log.{log.level.lower()}",
                 value=log.message[:200],
                 raw_payload=raw_payload,
-                source=EventSource.ELK,  # 复用 ELK 作为日志源
+                source=EventSource.OPENRCA,
             ))
         return events
 

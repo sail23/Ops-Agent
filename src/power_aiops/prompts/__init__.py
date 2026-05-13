@@ -9,6 +9,7 @@ from power_aiops.prompts.cot_steps import (
     format_cot_prompt,
 )
 from power_aiops.prompts.roles import (
+    MONITOR_TOOLS_PROMPT,
     SHARED_STYLE_FOOTER,
     SYSTEM_PROMPT_CODE_AGENT,
     SYSTEM_PROMPT_OPS_AGENT,
@@ -24,6 +25,7 @@ __all__ = [
     "STEP3_ROOT_CAUSE",
     "STEP4_PLAN",
     "STEP5_RISK",
+    "MONITOR_TOOLS_PROMPT",
     "SHARED_STYLE_FOOTER",
     "SYSTEM_PROMPT_CODE_AGENT",
     "SYSTEM_PROMPT_OPS_AGENT",

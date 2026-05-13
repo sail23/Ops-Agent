@@ -36,12 +36,13 @@ T = TypeVar("T")
 class ToolCategory(Enum):
     """工具分类."""
 
-    FILE = "file"  # 文件操作
-    SEARCH = "search"  # 代码搜索
-    EXECUTION = "execution"  # 代码执行
-    ANALYSIS = "analysis"  # 代码分析
-    DATABASE = "database"  # 数据库查询
-    SYSTEM = "system"  # 系统信息
+    FILE = "file"
+    SEARCH = "search"
+    EXECUTION = "execution"
+    ANALYSIS = "analysis"
+    MONITOR = "monitor"
+    REPORT = "report"
+    NOTIFY = "notify"
 
 
 @dataclass
@@ -155,6 +156,7 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
         self._categories: dict[ToolCategory, list[str]] = {}
+        self._logger = logging.getLogger(f"{__name__}.ToolRegistry")
 
     def register(self, tool: Tool) -> None:
         """注册工具.
@@ -340,10 +342,12 @@ def _register_default_tools(registry: ToolRegistry) -> None:
     from power_aiops.agents.tools.report_tools import MarkdownToDocxTool, MarkdownToPdfTool, ReportTemplateTool
     from power_aiops.agents.tools.notify_tools import MarkdownToHtmlTool, TextTemplateTool, WebhookTool
     from power_aiops.agents.tools.monitor_tools import (
-        ConfigQueryTool,
-        MetricsSummaryTool,
-        PrometheusQueryTool,
+        PrometheusAlertsTool,
         PrometheusRulesTool,
+        PrometheusQueryTool,
+        PrometheusQueryRangeTool,
+        MetricsSummaryTool,
+        ConfigQueryTool,
     )
 
     # 注册文件操作工具
@@ -372,7 +376,9 @@ def _register_default_tools(registry: ToolRegistry) -> None:
     registry.register(TextTemplateTool())
 
     # 注册监控工具
-    registry.register(PrometheusQueryTool())
+    registry.register(PrometheusAlertsTool())
     registry.register(PrometheusRulesTool())
+    registry.register(PrometheusQueryTool())
+    registry.register(PrometheusQueryRangeTool())
     registry.register(MetricsSummaryTool())
     registry.register(ConfigQueryTool())

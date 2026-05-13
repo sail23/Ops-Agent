@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     openrca_dataset_path: str = "dataset"
     openrca_system: str = "Bank"  # Bank / Telecom / Market
 
+    # Prometheus (remote monitoring integration)
+    prometheus_base_url: str = "http://127.0.0.1:9090"
+    prometheus_bearer_token: str = ""
+    prometheus_verify_tls: bool = True
+    prometheus_timeout_seconds: int = 10
+    prometheus_mock_mode: bool = False
+
     # Code Agent Configuration (always uses DynamicCodeAgent)
     code_execution_enabled: bool = False  # Enable code execution (security risk!)
     code_execution_timeout: int = 30  # Code execution timeout in seconds

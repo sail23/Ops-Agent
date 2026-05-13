@@ -7,10 +7,7 @@ from pydantic import BaseModel, Field
 
 class EventSource(str, Enum):
     PROMETHEUS = "prometheus"
-    ZABBIX = "zabbix"
-    ELK = "elk"
-    SNMP = "snmp"
-    APM = "apm"
+    OPENRCA = "openrca"
     MANUAL = "manual"
 
 

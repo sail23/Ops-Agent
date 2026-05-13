@@ -1,8 +1,3 @@
-from power_aiops.integrations.elk import (
-    ElkClientConfig,
-    fetch_events_stub as fetch_elk_events_stub,
-    map_elk_hit_to_event,
-)
 from power_aiops.integrations.openrca import (
     OpenRCAClient,
     OpenRCAConfig,
@@ -14,13 +9,19 @@ from power_aiops.integrations.openrca import (
 )
 from power_aiops.integrations.prometheus import (
     PrometheusClientConfig,
-    fetch_events_stub as fetch_prometheus_events_stub,
+    PrometheusClient,
+    MockPrometheusClient,
+    get_prometheus_client,
+    fetch_events_stub,
     map_prometheus_sample_to_event,
+    map_alert_to_event,
 )
 
 __all__ = [
-    "ElkClientConfig",
     "PrometheusClientConfig",
+    "PrometheusClient",
+    "MockPrometheusClient",
+    "get_prometheus_client",
     "OpenRCAClient",
     "OpenRCAConfig",
     "QueryRecord",
@@ -28,8 +29,6 @@ __all__ = [
     "LogEvent",
     "MetricPoint",
     "TraceSpan",
-    "fetch_elk_events_stub",
-    "fetch_prometheus_events_stub",
-    "map_elk_hit_to_event",
+    "fetch_events_stub",
     "map_prometheus_sample_to_event",
 ]
