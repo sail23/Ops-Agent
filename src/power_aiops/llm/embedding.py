@@ -41,6 +41,8 @@ def _normalize_vector(vector: list[float]) -> list[float]:
 class ZhipuEmbeddingClient:
     """Zhipu AI embedding client with retry, fallback, and connection pooling."""
 
+    _fallback_warned: bool = False
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -150,22 +152,46 @@ class ZhipuEmbeddingClient:
             raise RuntimeError(f"Invalid embedding response: {data}") from e
 
     def embed_single(self, text: str) -> list[float]:
-        """Embed with fallback: API → hash fallback, always returns normalized vector."""
+        """Embed with fallback: API → hash fallback, always returns normalized vector.
+
+        When Zhipu API key is unconfigured or the API call fails, falls back to a
+        deterministic SHA-256 hash (NOT semantic).  A one-time warning is emitted
+        so operators know semantic search results are unreliable.
+        """
+        if not self.is_configured():
+            ZhipuEmbeddingClient._warn_fallback_once("single")
+            return _hash_embedding_fallback(text, self._dimensions)
+
         try:
-            if self.is_configured():
-                return _normalize_vector(self.embed(text))
+            return _normalize_vector(self.embed(text))
         except Exception as e:
-            logger.warning(f"Zhipu embedding failed, using hash fallback: {e}")
-        return _hash_embedding_fallback(text, self._dimensions)
+            ZhipuEmbeddingClient._warn_fallback_once(f"single ({e})")
+            return _hash_embedding_fallback(text, self._dimensions)
 
     def embed_batch_with_fallback(self, texts: list[str]) -> list[list[float]]:
         """Batch embed with fallback: API → per-text hash fallback."""
         if not texts:
             return []
+        if not self.is_configured():
+            ZhipuEmbeddingClient._warn_fallback_once("batch")
+            return [_hash_embedding_fallback(t, self._dimensions) for t in texts]
+
         try:
-            if self.is_configured():
-                raw = self.embed_batch(texts)
-                return [_normalize_vector(v) for v in raw]
+            raw = self.embed_batch(texts)
+            return [_normalize_vector(v) for v in raw]
         except Exception as e:
-            logger.warning(f"Zhipu batch embedding failed, using hash fallback: {e}")
-        return [_hash_embedding_fallback(t, self._dimensions) for t in texts]
+            ZhipuEmbeddingClient._warn_fallback_once(f"batch ({e})")
+            return [_hash_embedding_fallback(t, self._dimensions) for t in texts]
+
+    @classmethod
+    def _warn_fallback_once(cls, detail: str) -> None:
+        """Emit a prominent warning about hash fallback (once per process)."""
+        if not cls._fallback_warned:
+            cls._fallback_warned = True
+            logger.warning(
+                "Zhipu embedding API not configured or unavailable — "
+                "FALLING BACK TO DETERMINISTIC HASH (non-semantic). "
+                "Vector/Graph RAG similarity search will return meaningless results. "
+                "Set ZHIPU_API_KEY in .env to enable semantic embeddings. "
+                "(detail: %s)", detail
+            )

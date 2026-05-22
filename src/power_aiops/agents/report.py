@@ -6,21 +6,21 @@ from typing import TYPE_CHECKING, AsyncGenerator
 
 from power_aiops.agents.base import AgentResult, AgentStreamChunk, BaseAgent
 from power_aiops.llm.client import OpenAICompatibleClient
-from power_aiops.memory.shared_board import SharedBoard
+from power_aiops.memory.shared_board import (
+    BOARD_KEY_CODE,
+    BOARD_KEY_EXPORT_PATH,
+    BOARD_KEY_OPS,
+    BOARD_KEY_REPORT,
+    BOARD_KEY_SRE,
+    BOARD_KEY_VISUALIZATION,
+    SharedBoard,
+)
 from power_aiops.models.incident import IncidentContext
 from power_aiops.prompts import SYSTEM_PROMPT_REPORT_AGENT
 from power_aiops.visualization import GPTVisRenderer
 
 if TYPE_CHECKING:
     from power_aiops.agents.tools import ToolRegistry
-
-# SharedBoard keys
-BOARD_KEY_OPS = "ops_output"
-BOARD_KEY_SRE = "sre_output"
-BOARD_KEY_CODE = "code_output"
-BOARD_KEY_REPORT = "report_output"
-BOARD_KEY_VISUALIZATION = "visualization_data"
-BOARD_KEY_EXPORT_PATH = "export_path"
 
 
 class ReportAgent(BaseAgent):

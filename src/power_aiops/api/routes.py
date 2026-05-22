@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import io
+import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,7 +16,6 @@ from power_aiops.api.schemas import (
     DebateRunRequest,
     DebateRunResponse,
     DebateTurnItem,
-    EventIn,
     FaultCaseCreate,
     FaultCaseResponse,
     FaultCaseUpdate,
@@ -140,6 +140,21 @@ def post_debate_run(body: DebateRunRequest) -> DebateRunResponse:
 
 # 全局辩论会话管理（key: incident_id）
 _debate_sessions: dict[str, dict] = {}
+_SESSION_TTL_SECONDS = 300  # sessions expire after 5 minutes
+
+
+def _cleanup_stale_sessions() -> None:
+    """Remove sessions that exceed the TTL (prevents memory leak)."""
+    now = time.monotonic()
+    stale = [
+        sid for sid, s in _debate_sessions.items()
+        if now - s.get("created_at", now) > _SESSION_TTL_SECONDS
+    ]
+    for sid in stale:
+        _debate_sessions.pop(sid, None)
+    if stale:
+        import logging
+        logging.getLogger(__name__).info("Cleaned up %d stale debate session(s)", len(stale))
 
 
 @router.post("/debate/stream")
@@ -150,24 +165,27 @@ def post_debate_stream(body: DebateRunRequest):
       - 辩论在 R2 收敛失败时 yield pause_request 事件并暂停
       - 前端收到后显示确认按钮，用户确认后 POST /debate/control 放行
     """
-    import asyncio, uuid
+    import uuid
     from power_aiops.config import get_settings
 
     settings = get_settings()
 
     ctx = build_incident_context(body)
-    max_rounds = body.max_rounds if body.max_rounds is not None else settings.debate_max_rounds
     max_turns = body.max_turns if body.max_turns is not None else settings.debate_max_turns
 
     session_id = ctx.incident_id or uuid.uuid4().hex[:8]
     pause_event = asyncio.Event()
     pause_event.set()  # 默认已就绪
 
+    # 清理过期会话
+    _cleanup_stale_sessions()
+
     # 注册会话
     _debate_sessions[session_id] = {
         "pause_event": pause_event,
         "approved": False,
         "incident_id": ctx.incident_id,
+        "created_at": time.monotonic(),
     }
 
     async def event_generator():
@@ -205,10 +223,19 @@ def post_debate_control(
 
     当前端收到 pause_request 事件后，调用此接口放行。
     """
+    _cleanup_stale_sessions()
+
     if session_id not in _debate_sessions:
         raise HTTPException(status_code=404, detail="辩论会话不存在或已结束")
 
     session = _debate_sessions[session_id]
+
+    # Check TTL expiry
+    now = time.monotonic()
+    if now - session.get("created_at", now) > _SESSION_TTL_SECONDS:
+        _debate_sessions.pop(session_id, None)
+        raise HTTPException(status_code=410, detail="辩论会话已过期")
+
     pause_event: asyncio.Event = session["pause_event"]
 
     if action == "approve":

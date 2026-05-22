@@ -4,13 +4,15 @@ from power_aiops.orchestration.debate_orchestrator import (
     run_debate,
     stream_debate,
 )
-from power_aiops.orchestration.pipeline import (
+from power_aiops.memory.shared_board import (
     BOARD_KEY_CODE,
     BOARD_KEY_CODE_BLOCKED,
     BOARD_KEY_FENCE_MATCHED,
     BOARD_KEY_OPS,
     BOARD_KEY_REPORT,
     BOARD_KEY_SRE,
+)
+from power_aiops.orchestration.pipeline import (
     run_pipeline,
     stream_pipeline,
 )

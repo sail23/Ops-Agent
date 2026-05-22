@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from power_aiops.agents.tools.base import (
     Tool,
@@ -177,7 +176,6 @@ class MarkdownToHtmlTool(Tool):
 
     def _convert_to_html(self, markdown_text: str, include_styles: bool) -> str:
         """将 Markdown 转换为 HTML."""
-        import re
 
         if include_styles:
             html = self._html_with_styles(markdown_text)

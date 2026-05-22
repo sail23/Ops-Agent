@@ -5,18 +5,12 @@ from typing import AsyncGenerator
 
 from power_aiops.agents.base import AgentResult, AgentStreamChunk, BaseAgent
 from power_aiops.llm.client import OpenAICompatibleClient
-from power_aiops.memory.shared_board import SharedBoard
+from power_aiops.memory.shared_board import (
+    BOARD_KEY_OPS,
+    SharedBoard,
+)
 from power_aiops.models.incident import IncidentContext
 from power_aiops.prompts import SYSTEM_PROMPT_OPS_AGENT
-
-
-# SharedBoard fixed keys for API/test assertions
-BOARD_KEY_OPS = "ops_output"
-BOARD_KEY_SRE = "sre_output"
-BOARD_KEY_CODE = "code_output"
-BOARD_KEY_REPORT = "report_output"
-BOARD_KEY_CODE_BLOCKED = "code_blocked"
-BOARD_KEY_FENCE_MATCHED = "fence_matched"
 
 
 class OpsAgent(BaseAgent):

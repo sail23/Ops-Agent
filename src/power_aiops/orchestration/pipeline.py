@@ -11,7 +11,11 @@ from power_aiops.agents import (
 from power_aiops.agents.base import AgentStreamChunk, BaseAgent
 from power_aiops.memory.long_term import LongTermMemory
 from power_aiops.memory.message_log import MessageLog
-from power_aiops.memory.shared_board import SharedBoard
+from power_aiops.memory.shared_board import (
+    BOARD_KEY_CODE_BLOCKED,
+    BOARD_KEY_FENCE_MATCHED,
+    SharedBoard,
+)
 from power_aiops.memory.short_term import ShortTermMemory
 from power_aiops.models.incident import IncidentContext
 from power_aiops.models.messages import (
@@ -23,25 +27,24 @@ from power_aiops.models.messages import (
 )
 from power_aiops.orchestration.state import PipelineState
 
-# SharedBoard fixed keys for API/test assertions
-BOARD_KEY_OPS = "ops_output"
-BOARD_KEY_SRE = "sre_output"
-BOARD_KEY_CODE = "code_output"
-BOARD_KEY_REPORT = "report_output"
-BOARD_KEY_CODE_BLOCKED = "code_blocked"
-BOARD_KEY_FENCE_MATCHED = "fence_matched"
 
+def _create_default_agents(
+    board: SharedBoard,
+    long_term_memory: LongTermMemory | None = None,
+) -> tuple[BaseAgent, BaseAgent, BaseAgent, BaseAgent]:
+    """Create the default 4-agent pipeline tuple.
 
-def _create_code_agent(board: SharedBoard) -> BaseAgent:
-    """Create CodeAgent using DynamicCodeAgent (enhanced RCA style).
-
-    DynamicCodeAgent supports:
-    - Dynamic Python code generation for data analysis
-    - Neo4j graph database queries (Trace/fault cases)
-    - OpenRCA dataset analysis
-    - Secure code execution sandbox
+    Initializes LongTermMemory if not provided; SREAgent gets it for hybrid RAG.
+    CodeAgent uses DynamicCodeAgent.
     """
-    return DynamicCodeAgent(board=board)
+    if long_term_memory is None:
+        long_term_memory = LongTermMemory()
+    return (
+        OpsAgent(board=board),
+        SREAgent(board=board, long_term_memory=long_term_memory),
+        DynamicCodeAgent(board=board),
+        ReportAgent(board=board),
+    )
 
 
 def run_pipeline(
@@ -66,17 +69,7 @@ def run_pipeline(
     memory = memory or ShortTermMemory()
 
     if agents is None:
-        # Initialize LongTermMemory if not provided
-        if long_term_memory is None:
-            long_term_memory = LongTermMemory()
-
-        # Pass shared board to all agents
-        agents = (
-            OpsAgent(board=board),
-            SREAgent(board=board, long_term_memory=long_term_memory),
-            _create_code_agent(board),
-            ReportAgent(board=board),
-        )
+        agents = _create_default_agents(board, long_term_memory)
 
     agent_list = list(agents)
     step_labels = ("ops", "sre", "code", "report")
@@ -139,16 +132,7 @@ async def stream_pipeline(
     memory = memory or ShortTermMemory()
 
     if agents is None:
-        # Initialize LongTermMemory if not provided
-        if long_term_memory is None:
-            long_term_memory = LongTermMemory()
-
-        agents = (
-            OpsAgent(board=board),
-            SREAgent(board=board, long_term_memory=long_term_memory),
-            _create_code_agent(board),
-            ReportAgent(board=board),
-        )
+        agents = _create_default_agents(board, long_term_memory)
 
     agent_list = list(agents)
     step_labels = ("ops", "sre", "code", "report")

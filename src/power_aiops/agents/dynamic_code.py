@@ -30,27 +30,21 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 
 from power_aiops.agents.base import AgentResult, AgentStreamChunk, BaseAgent
 from power_aiops.llm.client import OpenAICompatibleClient
 from power_aiops.memory.graph_rag import GraphRAG
-from power_aiops.memory.shared_board import SharedBoard
+from power_aiops.memory.shared_board import (
+    BOARD_KEY_CODE,
+    BOARD_KEY_CODE_RESULT,
+    SharedBoard,
+)
 from power_aiops.models.incident import IncidentContext
-from power_aiops.prompts import SYSTEM_PROMPT_CODE_AGENT
 from power_aiops.security.fences import fence_check_text
 
 logger = logging.getLogger(__name__)
-
-# SharedBoard keys
-BOARD_KEY_OPS = "ops_output"
-BOARD_KEY_SRE = "sre_output"
-BOARD_KEY_CODE = "code_output"
-BOARD_KEY_REPORT = "report_output"
-BOARD_KEY_GRAPH_CONTEXT = "graph_rag_context"
-BOARD_KEY_CODE_RESULT = "code_execution_result"
 
 
 @dataclass
@@ -194,9 +188,6 @@ class DynamicCodeAgent(BaseAgent):
 
     def _build_query_context(self, ctx: IncidentContext) -> DataQueryContext:
         """从 IncidentContext 构建数据分析上下文."""
-        # 从 SharedBoard 获取 SRE 分析结果
-        sre_output = self._board.get(BOARD_KEY_SRE, "")
-
         # 提取涉及的服务
         services = []
         error_services = []
@@ -595,7 +586,6 @@ print("分析完成")
         dangerous_patterns = [
             r"\brm\s+-rf\b",
             r"\brmdir\b",
-            r"\bdel\s+\b",
             r"\.unlink\(",
             r"\.remove\(",
             r"\.rmtree\(",
@@ -604,7 +594,8 @@ print("分析完成")
             r"eval\s*\(",
             r"exec\s*\(",
             r"os\.system",
-            r"subprocess.*shell\s*=\s*True",
+            r"os\.popen",
+            r"subprocess\.(run|Popen|call)\s*\(",
             r"\bsocket\.",
             r"\bcurl.*--max-time",
             r"wget\s+",

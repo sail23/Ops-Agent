@@ -141,8 +141,13 @@ _NEXT_TURN_RE = re.compile(
 )
 
 
-def parse_next_turn(text: str) -> NextTurnHint:
-    """从 LLM 输出文本中解析 next_turn 指令。"""
+def parse_next_turn(text: str) -> NextTurnHint | None:
+    """从 LLM 输出文本中解析 next_turn 指令。
+
+    Returns:
+        NextTurnHint 值，如果 LLM 输出中没有可识别的指令则返回 None。
+        调用方遇到 None 时应保留当前发言者继续辩论。
+    """
     m = _NEXT_TURN_RE.search(text)
     if not m:
         # fallback：关键词扫描
@@ -155,7 +160,7 @@ def parse_next_turn(text: str) -> NextTurnHint:
             return NextTurnHint.DISPUTE
         if "terminate" in raw or "终止" in raw:
             return NextTurnHint.TERMINATE
-        return NextTurnHint.TERMINATE
+        return None  # 无关键词 → 返回 None，不自动终止
 
     hint_text = m.group(1).strip().lower()
     if "sre" in hint_text and "converge" not in hint_text:
@@ -172,7 +177,7 @@ def parse_next_turn(text: str) -> NextTurnHint:
         return NextTurnHint.REPORT
     if "terminate" in hint_text or "终止" in hint_text:
         return NextTurnHint.TERMINATE
-    return NextTurnHint.TERMINATE
+    return None  # 未匹配 → 返回 None，不自动终止
 
 
 def next_turn_hint_to_role(hint: NextTurnHint) -> DebateRole | None:
@@ -226,51 +231,29 @@ class DebateState:
     convergence_score: float = 0.0
 
     # 动态路由状态
-    has_ops_initial: bool = False  # R0 Ops 是否完成
-    has_sre_initial: bool = False  # R0 SRE 是否完成
-    has_code_initial: bool = False  # R0 Code 是否完成
-    converge_attempts: int = 0       # 收敛尝试次数（防止无限循环）
-
+    has_ops_initial: bool = False
+    has_sre_initial: bool = False
+    has_code_initial: bool = False
     # 争议记录
     disputed_points: list[str] = field(default_factory=list)
+    pending_round: str | None = None  # 路由层可设置此值覆盖 _get_round_for_role 的结果
 
     def add_turn(self, turn: DebateTurn) -> None:
         self.turns.append(turn)
         self.current_turn += 1
 
-        content = turn.message.content[:500]
-        if turn.role == DebateRole.OPS.value:
-            self.ops_position = content
-            self.has_ops_initial = True
-        elif turn.role == DebateRole.SRE.value:
-            self.sre_position = content
-            self.has_sre_initial = True
-        elif turn.role == DebateRole.CODE.value:
-            self.code_position = content
-            self.has_code_initial = True
+        # 根据 round 名称标记 initial 状态（用于 _get_round_for_role）
+        if turn.round.endswith("_initial"):
+            if turn.role == DebateRole.OPS.value:
+                self.has_ops_initial = True
+            elif turn.role == DebateRole.SRE.value:
+                self.has_sre_initial = True
+            elif turn.role == DebateRole.CODE.value:
+                self.has_code_initial = True
 
-        self._update_convergence()
-
-    def _update_convergence(self) -> None:
-        """基于各 Agent 最新立场计算收敛分（0.0~1.0）。"""
-        positions = [self.ops_position, self.sre_position, self.code_position]
-        filled = [p for p in positions if p]
-        if len(filled) < 2:
-            self.convergence_score = 0.0
-            return
-
-        tokens_a = set(self.ops_position.split())
-        tokens_b = set(self.sre_position.split())
-        tokens_c = set(self.code_position.split())
-
-        def jaccard(a: set, b: set) -> float:
-            return len(a & b) / max(len(a | b), 1)
-
-        overlap_ab = jaccard(tokens_a, tokens_b)
-        overlap_bc = jaccard(tokens_b, tokens_c)
-        overlap_ac = jaccard(tokens_a, tokens_c)
-
-        self.convergence_score = round((overlap_ab + overlap_bc + overlap_ac) / 3, 3)
+        # 简化收敛分：仅基于轮次完成度（供 API 展示，不影响路由）
+        if self.has_ops_initial and self.has_sre_initial and self.has_code_initial:
+            self.convergence_score = round(min(0.3 + 0.1 * self.current_turn, 1.0), 2)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -300,7 +283,6 @@ class DebateState:
             "sre_position": self.sre_position,
             "code_position": self.code_position,
             "convergence_score": self.convergence_score,
-            "converge_attempts": self.converge_attempts,
             "disputed_points": self.disputed_points,
         }
 

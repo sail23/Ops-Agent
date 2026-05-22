@@ -6,10 +6,8 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
-from typing import Any
 
 from power_aiops.agents.tools.base import (
     Tool,
@@ -32,7 +30,8 @@ def _register_cjk_font() -> None:
 
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
-    import os, glob
+    import os
+    import glob
 
     font_paths = [
         "C:/Windows/Fonts/simsun.ttc",
@@ -186,7 +185,7 @@ class MarkdownToDocxTool(Tool):
 
                 return ToolResult(
                     success=False,
-                    error=f"python-docx 未安装，已导出 HTML 格式",
+                    error="python-docx 未安装，已导出 HTML 格式",
                     data={
                         "path": html_path,
                         "format": "html",
@@ -199,8 +198,6 @@ class MarkdownToDocxTool(Tool):
 
     def _markdown_to_docx(self, doc, markdown_text: str) -> None:
         """将 Markdown 内容转换为 DOCX."""
-        from docx.shared import Pt
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
 
         lines = markdown_text.split("\n")
         current_paragraph = None

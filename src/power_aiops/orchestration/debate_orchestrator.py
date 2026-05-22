@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 _SECTION_RE = re.compile(
     r"^##\s*(reasoning|conclusion|confidence|disputed_points|consensus_points|"
     r"script_needs|script_additions|convergence|ready_for_report|verdict|"
+    r"verdict_on_conclusion|quality_assessment|"
     r"final_report|stance|next_turn)\s*$",
     re.MULTILINE | re.IGNORECASE,
 )
@@ -111,7 +112,8 @@ def _extract_meta(text: str) -> dict[str, Any]:
     meta["convergence"] = "true" if sections.get("convergence", "").strip().lower() == "true" else "false"
     meta["disputed_points"] = [p.strip() for p in sections.get("disputed_points", "").splitlines() if p.strip()]
     meta["consensus_points"] = [p.strip() for p in sections.get("consensus_points", "").splitlines() if p.strip()]
-    meta["next_turn"] = parse_next_turn(text).value
+    next_hint = parse_next_turn(text)
+    meta["next_turn"] = next_hint.value if next_hint else "none"
     meta["stance"] = sections.get("stance", "").strip().lower()
     meta["ready_for_report"] = sections.get("ready_for_report", "").strip().lower() == "true"
 
@@ -172,6 +174,17 @@ class DebateAgentWrapper:
             if history:
                 lines.append(f"\n{history}")
 
+        # 从 SharedBoard 读取全量辩论历史（当前 incident 的所有轮次）
+        sb = self._board.snapshot()
+        prefix = f"debate_{ctx.incident_id}_turn_"
+        debate_keys = [k for k in sb if k.startswith(prefix)]
+        if debate_keys:
+            lines.append("\n## 辩论全程记录（SharedBoard）")
+            for key in sorted(debate_keys, key=lambda k: int(k.split("_")[-1])):
+                turn_data = sb[key]
+                lines.append(f"\n### {turn_data['role']} ({turn_data['round']}):")
+                lines.append(f"{turn_data['content'][:800]}")
+
         return "\n".join(lines)
 
     def execute(
@@ -205,9 +218,13 @@ class DebateAgentWrapper:
         return conclusion, reasoning, meta, next_turn
 
     def _execute_code_role(self, ctx: IncidentContext) -> tuple[str, str, dict[str, Any], NextTurnHint]:
-        """执行 CODE 角色：使用 DynamicCodeAgent 生成分析代码。"""
+        """执行 CODE 角色：使用 DynamicCodeAgent 生成分析代码。
+
+        代码生成后回到 SRE 审阅结果，而不是直接 converge。
+        SRE 审阅后可以在下一轮再次要求 Code 修改。
+        """
         if self._dynamic_code_agent is None:
-            return self._stub_output(DebateRound.CODE_INITIAL), "", {}, NextTurnHint.CONVERGE
+            return self._stub_output(DebateRound.CODE_INITIAL), "", {}, NextTurnHint.SRE
 
         try:
             # 运行 DynamicCodeAgent 获取代码
@@ -222,16 +239,17 @@ class DebateAgentWrapper:
                 "convergence": "false",
                 "disputed_points": [],
                 "consensus_points": [],
-                "next_turn": "converge",
+                "next_turn": "sre",
                 "code_blocked": result.blocked,
                 "code_length": len(result.content),
             }
 
-            next_turn = NextTurnHint.CONVERGE
+            # CODE 输出后回到 SRE，让 SRE 审阅代码结果
+            next_turn = NextTurnHint.SRE
             return conclusion, reasoning, meta, next_turn
         except Exception as e:
             logger.warning(f"DynamicCodeAgent execution failed: {e}")
-            return self._stub_output(DebateRound.CODE_INITIAL), "", {}, NextTurnHint.CONVERGE
+            return self._stub_output(DebateRound.CODE_INITIAL), "", {}, NextTurnHint.SRE
 
     def _stub_output(self, round_obj: DebateRound) -> str:
         stubs: dict[str, str] = {
@@ -250,11 +268,11 @@ class DebateAgentWrapper:
                 "## next_turn\ncode"
             ),
             "code_initial": (
-                "## reasoning\n需要验证主备链路和连接池配置后再决定切换策略。\n"
-                "## conclusion\n建议准备数据库健康检查脚本，验证后再切换。\n"
+                "## reasoning\n生成数据库健康检查脚本。\n"
+                "## conclusion\n脚本已生成：连接池状态查询 + 备库延迟检测。\n"
                 "## confidence\n中\n"
                 "## script_needs\n1. 数据库连接池状态查询\n2. 备库同步延迟检测\n"
-                "## next_turn\nconverge"
+                "## next_turn\nsre"
             ),
             "ops_review": (
                 "## reasoning\n支持 SRE 的主备切换方案，需补充业务通知。\n"
@@ -263,17 +281,17 @@ class DebateAgentWrapper:
                 "## next_turn\nsre"
             ),
             "sre_review": (
-                "## reasoning\n三方意见已基本收敛。\n"
-                "## conclusion\n方案确定：主备切换 + 脚本验证。\n"
+                "## reasoning\n审阅了 Code 的脚本，符合要求。如需进一步修改可要求 Code 调整。\n"
+                "## conclusion\n方案可行，脚本符合安全规范。\n"
                 "## consensus_points\n根因=连接池瓶颈\n方案=切换+验证\n"
                 "## disputed_points\n空\n"
-                "## next_turn\nconverge"
+                "## next_turn\ncode"
             ),
             "code_review": (
-                "## reasoning\nSRE 方案可行，但需确保脚本在切换前完成前置检查。\n"
-                "## conclusion\n建议增加：1. 备库延迟检测 2. 切换后监控。\n"
+                "## reasoning\n根据 SRE 的审阅意见调整了脚本。\n"
+                "## conclusion\n脚本已更新：增加了前置检查和回滚步骤。\n"
                 "## disputed_points\n空\n"
-                "## next_turn\nconverge"
+                "## next_turn\nsre"
             ),
             "converge": (
                 "## reasoning\n三方已达成共识：根因=连接池瓶颈，方案=切换+验证。\n"
@@ -328,7 +346,7 @@ class DebateOrchestrator:
             self._wrapped_agents[role] = DebateAgentWrapper(
                 role=role,
                 llm=self._llm,
-                board=self._shared_board if role == DebateRole.CODE else None,
+                board=self._shared_board,  # SharedBoard 单例，所有 Agent 读写同一份
             )
 
     def _get_round_for_role(self, role: DebateRole, state: DebateState) -> DebateRound:
@@ -348,16 +366,12 @@ class DebateOrchestrator:
         return DebateRound.REPORT
 
     def _get_next_speaker(self, state: DebateState, hint: NextTurnHint) -> DebateRole | None:
-        """根据 next_turn 指令 + 辩论状态决定下一个发言者。"""
+        """根据 next_turn 指令映射到发言角色。"""
         hint_role = next_turn_hint_to_role(hint)
         if hint_role:
             return hint_role
 
-        if hint == NextTurnHint.CONVERGE:
-            state.converge_attempts += 1
-            return DebateRole.SRE  # converge 由 SRE 执行
-
-        # DISPUTE / TERMINATE / 未知：返回 None，触发终止
+        # 未知指令：返回 None，由路由层处理（保留当前发言者）
         return None
 
     def _should_terminate(self) -> bool:
@@ -366,16 +380,6 @@ class DebateOrchestrator:
         if self._state.terminated:
             return True
         if self._state.current_turn >= self._state.max_turns:
-            # 检查是否已有 Report 轮次
-            has_report = any(
-                t.round == DebateRound.REPORT.value
-                for t in self._state.turns
-            )
-            if not has_report:
-                # 强制添加一个 Report 轮次
-                logger.warning(f"达到最大轮次 {self._state.max_turns}，强制进入 Report 阶段")
-                self._state.terminated = False  # 重置以便执行 Report
-                return False  # 不终止，让 Report 阶段执行
             self._state.terminated = True
             self._state.termination_reason = "max_turns"
             return True
@@ -409,7 +413,11 @@ class DebateOrchestrator:
 
         while next_role and not self._should_terminate():
             role = next_role
-            round_obj = self._get_round_for_role(role, self._state)
+            if self._state.pending_round:
+                round_obj = DebateRound(self._state.pending_round)
+                self._state.pending_round = None
+            else:
+                round_obj = self._get_round_for_role(role, self._state)
             agent = self._wrapped_agents[role]
 
             try:
@@ -442,19 +450,54 @@ class DebateOrchestrator:
             )
             self._state.add_turn(turn)
 
+            # 本轮内容写入 SharedBoard（Agent 自行摘要后发布）
+            # content 已是 conclusion 节（Agent 自己的总结）
+            # reasoning 取前 300 字，太长则截断 + 行数标注
+            if len(reasoning) > 300:
+                reasoning_summary = reasoning[:300] + f"\n...（推理全文共 {len(reasoning)} 字，已截断）"
+            else:
+                reasoning_summary = reasoning
+            turn_key = f"debate_{ctx.incident_id}_turn_{self._state.current_turn}"
+            self._shared_board.set(turn_key, {
+                "round": round_obj.value,
+                "role": role.value,
+                "agent_id": agent.agent_id,
+                "content": conclusion,
+                "reasoning": reasoning_summary,
+                "next_turn": next_hint.value if next_hint else "none",
+            })
+
             if round_obj == DebateRound.REPORT:
                 self._handle_report_turn(turn)
 
-            next_role = self._get_next_speaker(self._state, next_hint)
-
-            if next_hint == NextTurnHint.DISPUTE:
+            # ── 路由决策（完全信任 LLM 的 next_turn 指令） ────
+            if next_hint == NextTurnHint.CONVERGE:
+                # LLM 要求 SRE 做收敛判断 → 使用 CONVERGE 轮次 prompt
+                logger.info(f"LLM 要求收敛判断，SRE 进入收敛轮")
+                self._state.pending_round = "converge"
+                next_role = DebateRole.SRE
+            elif next_hint == NextTurnHint.REPORT:
+                next_role = DebateRole.REPORT
+            elif next_hint == NextTurnHint.DISPUTE:
                 self._state.terminated = True
                 self._state.termination_reason = "dispute"
                 break
-            if next_hint == NextTurnHint.TERMINATE:
-                self._state.terminated = True
-                self._state.termination_reason = "terminate"
-                break
+            elif next_hint == NextTurnHint.TERMINATE:
+                if role == DebateRole.REPORT:
+                    self._state.terminated = True
+                    self._state.termination_reason = "converged"
+                    break
+                else:
+                    # 确保最终有 Report 总结方案（唯一保留的覆盖规则）
+                    logger.info("非 Report Agent 发出终止指令，强制进入 Report 阶段")
+                    next_role = DebateRole.REPORT
+            elif next_hint is None:
+                # LLM 未输出有效指令 → 保留当前发言者，让其再输出一轮
+                logger.info("LLM 未给出 next_turn 指令，保留当前发言者")
+                next_role = role
+            else:
+                # OPS / SRE / CODE / 其他 → 映射到对应角色
+                next_role = self._get_next_speaker(self._state, next_hint)
 
         return self._build_result()
 
@@ -492,7 +535,11 @@ class DebateOrchestrator:
         try:
             while next_role and not self._should_terminate():
                 role = next_role
-                round_obj = self._get_round_for_role(role, self._state)
+                if self._state.pending_round:
+                    round_obj = DebateRound(self._state.pending_round)
+                    self._state.pending_round = None
+                else:
+                    round_obj = self._get_round_for_role(role, self._state)
                 agent = self._wrapped_agents[role]
 
                 # turn_start 事件
@@ -556,6 +603,22 @@ class DebateOrchestrator:
                 )
 
                 self._state.add_turn(turn)
+
+                # 本轮内容写入 SharedBoard（Agent 自行摘要后发布）
+                if len(reasoning) > 300:
+                    reasoning_summary = reasoning[:300] + f"\n...（推理全文共 {len(reasoning)} 字，已截断）"
+                else:
+                    reasoning_summary = reasoning
+                turn_key = f"debate_{ctx.incident_id}_turn_{self._state.current_turn}"
+                self._shared_board.set(turn_key, {
+                    "round": round_obj.value,
+                    "role": role.value,
+                    "agent_id": agent.agent_id,
+                    "content": conclusion,
+                    "reasoning": reasoning_summary,
+                    "next_turn": next_hint.value if next_hint else "none",
+                })
+
                 ctx.metadata[BOARD_KEY_TURN_OUTPUT] = turn.message.content
                 ctx.metadata[BOARD_KEY_DEBATE_HISTORY] = self._board.snapshot()
 
@@ -571,31 +634,17 @@ class DebateOrchestrator:
                     "agent_id": agent.agent_id,
                     "success": turn.success,
                     "convergence_score": self._state.convergence_score,
-                    "next_turn": next_hint.value,
+                    "next_turn": next_hint.value if next_hint else "none",
                     "reasoning_preview": turn.message.reasoning[:200],
                 }
 
-                # ── 路由决策 ───────────────────────────────
-                # 如果任何 Agent 明确要求 report，或收敛成功，则进入 Report 阶段
-                if next_hint == NextTurnHint.REPORT:
+                # ── 路由决策（完全信任 LLM 的 next_turn 指令） ────
+                if next_hint == NextTurnHint.CONVERGE:
+                    logger.info("LLM 要求收敛判断，SRE 进入收敛轮")
+                    self._state.pending_round = "converge"
+                    next_role = DebateRole.SRE
+                elif next_hint == NextTurnHint.REPORT:
                     next_role = DebateRole.REPORT
-                elif next_hint == NextTurnHint.CONVERGE:
-                    # converge 尝试超过 3 次，强制进入 Report
-                    if self._state.converge_attempts >= 3:
-                        logger.info("收敛尝试已达3次，强制进入 Report 阶段")
-                        next_role = DebateRole.REPORT
-                    # 检查 convergence 字段是否明确为 true
-                    elif meta.get("convergence", "").lower() == "true":
-                        logger.info(f"收敛达成 (score={self._state.convergence_score:.2f})，进入 Report 阶段")
-                        next_role = DebateRole.REPORT
-                    # 检查收敛分数是否足够高
-                    elif self._state.convergence_score >= 0.7:
-                        logger.info(f"收敛分数达标 (score={self._state.convergence_score:.2f})，进入 Report 阶段")
-                        next_role = DebateRole.REPORT
-                    else:
-                        # 收敛失败，继续由 SRE 审视或进入 Report（降级）
-                        logger.warning(f"收敛未达成 (score={self._state.convergence_score:.2f})，强制进入 Report 阶段")
-                        next_role = DebateRole.REPORT  # 降级：无论如何都进入 Report
                 elif next_hint == NextTurnHint.DISPUTE:
                     self._state.terminated = True
                     self._state.termination_reason = "dispute"
@@ -613,9 +662,16 @@ class DebateOrchestrator:
                     yield {"type": "human_confirmed", "approved": True}
                     break
                 elif next_hint == NextTurnHint.TERMINATE:
-                    self._state.terminated = True
-                    self._state.termination_reason = "terminate"
-                    break
+                    if role == DebateRole.REPORT:
+                        self._state.terminated = True
+                        self._state.termination_reason = "converged"
+                        break
+                    else:
+                        logger.info("非 Report Agent 发出终止指令，强制进入 Report 阶段")
+                        next_role = DebateRole.REPORT
+                elif next_hint is None:
+                    logger.info("LLM 未给出 next_turn 指令，保留当前发言者")
+                    next_role = role
                 else:
                     next_role = self._get_next_speaker(self._state, next_hint)
 

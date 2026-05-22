@@ -10,7 +10,6 @@ class AgentRole(str, Enum):
 
 class Permission(str, Enum):
     READ_METRICS = auto()
-    WRITE_PRODUCTION = auto()
     APPROVE_PLAN = auto()
     GENERATE_CODE = auto()
     EXECUTE_SANDBOX = auto()

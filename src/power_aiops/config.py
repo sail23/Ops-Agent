@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,5 +51,6 @@ class Settings(BaseSettings):
     api_port: int = 8000
 
 
+@lru_cache
 def get_settings() -> Settings:
     return Settings()

@@ -11,7 +11,6 @@ Mock mode: returns realistic mock data for local development (PROMETHEUS_MOCK_MO
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from power_aiops.agents.tools.base import (
     Tool,

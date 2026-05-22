@@ -33,7 +33,7 @@ def chat_completion_stub(*, system: str, user: str) -> str:
     return (
         "[LLM stub] 未配置 OPENAI_API_KEY 或未启用云端调用。\n"
         f"--- user prompt ({len(user)} chars) ---\n"
-        f"{user[:2000]}{'…' if len(user) > 2000 else ''}"
+        f"{user[:200]}{'…' if len(user) > 200 else ''}"
     )
 
 

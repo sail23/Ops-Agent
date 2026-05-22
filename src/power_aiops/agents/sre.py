@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, AsyncGenerator
 from power_aiops.agents.base import AgentResult, AgentStreamChunk, BaseAgent
 from power_aiops.llm.client import OpenAICompatibleClient
 from power_aiops.memory.long_term import LongTermMemory
-from power_aiops.memory.shared_board import SharedBoard
+from power_aiops.memory.shared_board import (
+    BOARD_KEY_GRAPH_CONTEXT,
+    BOARD_KEY_OPS,
+    BOARD_KEY_SRE,
+    SharedBoard,
+)
 from power_aiops.models.incident import IncidentContext
 from power_aiops.prompts import SYSTEM_PROMPT_SRE_AGENT
 
@@ -16,13 +21,6 @@ if TYPE_CHECKING:
     from power_aiops.memory.long_term import LongTermMemory
 
 logger = logging.getLogger(__name__)
-
-# SharedBoard keys
-BOARD_KEY_OPS = "ops_output"
-BOARD_KEY_SRE = "sre_output"
-BOARD_KEY_CODE = "code_output"
-BOARD_KEY_REPORT = "report_output"
-BOARD_KEY_GRAPH_CONTEXT = "graph_rag_context"
 
 
 class SREAgent(BaseAgent):
@@ -227,7 +225,6 @@ class SREAgent(BaseAgent):
         return "\n".join(lines)
 
     def _placeholder(self, ctx: IncidentContext) -> str:
-        ops_output = self._board.get(BOARD_KEY_OPS, "")
         rag_context = self._board.get(BOARD_KEY_GRAPH_CONTEXT, "")
 
         lines = [
